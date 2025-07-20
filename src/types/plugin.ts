@@ -1,8 +1,13 @@
-import { ComponentType } from "react";
+import React, { ComponentType } from "react";
+
+type PluginComponentProps = {
+  invoke: typeof import("@tauri-apps/api/core").invoke;
+  useTauriEvent: typeof import("@util-hooks/use-tauri-event").useTauriEvent;
+};
 
 export interface Plugin {
   name: string;
-  component: ComponentType;
+  component: React.ComponentType<PluginComponentProps>;
   filename: string;
   error?: string;
 }

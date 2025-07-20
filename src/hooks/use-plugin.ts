@@ -125,15 +125,15 @@ export function usePlugins(): PluginHookReturn {
     setError(undefined);
 
     try {
-      const filenames = await invoke<string[]>("get_plugin_files");
+      const filenames = await invoke<string[]>("get_plugins");
       console.log("Found plugin files:", filenames);
 
       const loadedPlugins: Plugin[] = [];
 
       for (const filename of filenames) {
         try {
-          const jsxCode = await invoke<string>("read_plugin_file", {
-            filename,
+          const jsxCode = await invoke<string>("read_plugin", {
+            fileName: filename,
           });
           console.log(
             `Loaded code for ${filename}:`,
@@ -144,6 +144,7 @@ export function usePlugins(): PluginHookReturn {
 
           loadedPlugins.push({
             name: filename.replace(/\.(jsx|tsx)$/, ""),
+            // @ts-ignore
             component,
             filename,
           });

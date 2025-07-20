@@ -15,17 +15,18 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "@util-hooks/use-tauri-event": "^1.0.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
     "@tauri-apps/plugin-shell": "^2.3.0",
     "@types/babel__standalone": "^7.1.9",
-    "@types/react": "^18.3.1",
-    "@types/react-dom": "^18.3.1",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.3.4",
-    "typescript": "~5.6.2",
-    "vite": "^6.0.3"
+    "typescript": "~5.8.3",
+    "vite": "^7.0.5",
+    "vite-tsconfig-paths": "^5.1.4"
   }
 }
