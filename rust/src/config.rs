@@ -1,21 +1,19 @@
-use crate::error::{self, SkadiError};
+use crate::error::SkadiError;
 use gtk4::{
     gdk::{
         prelude::{DisplayExt, MonitorExt},
-        Display, Monitor, RGBA,
+        Display, RGBA,
     },
     gio::prelude::ListModelExtManual,
-    glib::object::ObjectExt,
     prelude::{GtkWindowExt, WidgetExt},
 };
 use gtk4_layer_shell::LayerShell;
-
 use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer,
 };
 use std::{fmt, fs, path::PathBuf};
-use traccia::{error, info};
+use traccia::{debug, error, info};
 use webkit6::prelude::WebViewExt;
 
 struct Paths;
@@ -143,7 +141,6 @@ impl Anchor {
                 window.set_anchor(gtk4_layer_shell::Edge::Left, false);
                 window.set_anchor(gtk4_layer_shell::Edge::Right, false);
             }
-            _ => {}
         }
     }
 }
@@ -281,6 +278,19 @@ impl Config {
     ) -> Result<Vec<gtk4::ApplicationWindow>, SkadiError> {
         let mut windows = Vec::new();
 
+        let Some(display) = Display::default() else {
+            return Err(SkadiError::WindowCreation(
+                "Could not connect to a display".to_string(),
+            ));
+        };
+
+        let monitors = display.monitors();
+
+        #[cfg(debug_assertions)]
+        {
+            debug!("Developer tools are enabled")
+        }
+
         for config in &self.windows {
             let window = gtk4::ApplicationWindow::builder()
                 .application(app)
@@ -317,13 +327,8 @@ impl Config {
             window.init_layer_shell();
             window.set_layer(config.layer.into());
 
-            let Some(display) = Display::default() else {
-                error!("Failed to get default display");
-                continue;
-            };
-
-            let monitors = display.monitors();
-
+            // Find the specified monitor
+            // (e.g. "eDP-1", "HDMI-A-1", etc.)
             let monitor = monitors
                 .iter()
                 .filter_map(Result::ok)

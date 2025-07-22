@@ -3,43 +3,21 @@ mod error;
 mod log;
 mod server;
 
-use std::{
-    fs,
-    net::{TcpListener, TcpStream},
-    path,
-};
-
+use crate::{config::Config, server::LocalServer};
 use gtk4::{
     gdk,
     gio::prelude::{ApplicationExt, ApplicationExtManual},
     prelude::{GtkWindowExt, WidgetExt},
-    Application,
 };
 use tokio::sync::oneshot;
 use traccia::{fatal, info};
 
-use crate::{config::Config, server::LocalServer};
-
 fn load_css() {
     let provider = gtk4::CssProvider::new();
     let css_str = r"
-        * {
-            all: unset;
-        }
-
         window {
             background-color: transparent;
-        }
-
-        webview {
-            background-color: transparent;
-            border: 0;
-
-    app.connect_s
-            outline: 0;
-            margin: 0;
-            padding: 0;
-        }
+        }            
     ";
 
     provider.load_from_string(css_str);
