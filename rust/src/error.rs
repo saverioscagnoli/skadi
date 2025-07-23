@@ -20,6 +20,6 @@ pub enum SkadiError {
     #[error("Failed to create application window: {0}")]
     WindowCreation(String),
 
-    #[error("Failed to setup server: {0}")]
-    ServerError(String),
+    #[error("Backend error: {0}")]
+    BackendError(String),
 }

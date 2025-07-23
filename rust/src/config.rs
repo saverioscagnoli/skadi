@@ -16,7 +16,7 @@ use std::{fmt, fs, path::PathBuf};
 use traccia::{debug, error, info};
 use webkit6::prelude::WebViewExt;
 
-struct Paths;
+pub struct Paths;
 
 impl Paths {
     pub fn config_dir() -> Result<PathBuf, SkadiError> {
@@ -227,7 +227,7 @@ pub struct Config {
 
 impl Config {
     pub fn default_port() -> u16 {
-        3497
+        3499
     }
 
     pub fn default_layer() -> Layer {
@@ -310,7 +310,7 @@ impl Config {
 
             // At this point, the server will be already started
             // So, load the local server uri to the webview
-            let uri = format!("http://localhost:{}", self.port);
+            let uri = format!("http://localhost:{}/html/{}.html", self.port, config.label);
 
             webview.load_uri(&uri);
 

@@ -1,3 +1,4 @@
+use gtk4::glib::LogWriterOutput;
 use traccia::{Color, Colorize, LogLevel, Style};
 
 struct CustomFormatter;
@@ -29,20 +30,7 @@ fn log_level() -> LogLevel {
 }
 
 fn disable_gtk_logs() {
-    // Try to set some env variables to reduce GTK and WebKit logging noise
-    std::env::set_var("G_MESSAGES_DEBUG", "");
-    std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
-    std::env::set_var("WEBKIT_FORCE_SANDBOX", "0");
-
-    // Redirect stderr to /dev/null for WebKit messages
-    unsafe {
-        let devnull = std::ffi::CString::new("/dev/null").unwrap();
-        let fd = libc::open(devnull.as_ptr(), libc::O_WRONLY);
-        if fd != -1 {
-            libc::dup2(fd, 2); // Redirect stderr
-            libc::close(fd);
-        }
-    }
+    gtk4::glib::log_set_writer_func(|_log_domain, _log_level| LogWriterOutput::Unhandled);
 }
 
 pub fn setup_logging() {

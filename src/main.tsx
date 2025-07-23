@@ -1,6 +1,13 @@
 import { createRoot } from "react-dom/client";
-import App from "./App.tsx";
+import plugins from "~/registry";
 
-import "./index.css";
+import "~/index.css";
 
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(
+  <div className="w-screen h-screen main-window">
+    <h1>main Window</h1>
+    {plugins.map(Plugin => (
+      <Plugin key={Plugin.name} />
+    ))}
+  </div>
+);

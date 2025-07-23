@@ -21,7 +21,14 @@
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedSideEffectImports": true
+    "noUncheckedSideEffectImports": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "~/*": ["src/*"],
+      "~/config/*": ["~/.config/skadi/*"],
+      "~/plugins/*": ["~/.config/skadi/plugins/*"]
+    }
   },
-  "include": ["src"]
+  "include": ["src", "~/.config/skadi/**/*"]
 }
