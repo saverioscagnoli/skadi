@@ -23,6 +23,7 @@ function resolveHtmlEntryPoints(): string[] {
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss(), tsconfigPaths()],
+  publicDir: `${homedir()}/.config/skadi/assets`,
   build: {
     rollupOptions: {
       input: resolveHtmlEntryPoints()

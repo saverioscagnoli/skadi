@@ -16,6 +16,9 @@ thiserror = "2.0.12"
 jsonc-parser = { version = "0.26.2", features = ["serde"] }
 serde_json = "1.0.141"
 tokio = { version = "1.46.1", features = ["full"] }
-axum = "0.8.4"
+axum = { version = "0.8.4", features = ["ws"] }
 mime_guess = "2.0.5"
 tower-http = { version = "0.6.6", features = ["fs"] }
+pollster = "0.4.0"
+futures-util = "0.3.31"
+

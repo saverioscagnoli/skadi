@@ -65,14 +65,16 @@ function generateTsxEntryPoint(label) {
   return `
 import { createRoot } from "react-dom/client";
 import plugins from "~/registry";
+import { exec, useListen } from "~/util";
 
 import "~/index.css";
 
+const LABEL = "${label}";
+
 createRoot(document.getElementById("root")!).render(
   <div className="w-screen h-screen ${label}-window">
-    <h1>${label} Window</h1>
     {plugins.map(Plugin => (
-      <Plugin key={Plugin.name} />
+      <Plugin key={Plugin.name} exec={exec(LABEL)} useListen={useListen} />
     ))}
   </div>
 );`.trim();

@@ -1,10 +1,14 @@
-use crate::error::SkadiError;
+use crate::{
+    error::SkadiError,
+    events::{EventEmitter, SendWebView},
+};
 use gtk4::{
     gdk::{
         prelude::{DisplayExt, MonitorExt},
         Display, RGBA,
     },
     gio::prelude::ListModelExtManual,
+    glib::{object::ObjectExt, value::ToValue},
     prelude::{GtkWindowExt, WidgetExt},
 };
 use gtk4_layer_shell::LayerShell;
@@ -12,7 +16,8 @@ use serde::{
     de::{self, Visitor},
     Deserialize, Deserializer,
 };
-use std::{fmt, fs, path::PathBuf};
+use std::{collections::HashMap, fmt, fs, path::PathBuf, sync::Arc};
+use tokio::sync::Mutex;
 use traccia::{debug, error, info};
 use webkit6::prelude::WebViewExt;
 
@@ -215,6 +220,15 @@ pub struct WindowConfig {
 
     #[serde(default = "Config::default_exclusive")]
     pub exclusive: bool,
+
+    #[serde(default)]
+    pub margin_top: Option<i32>,
+    #[serde(default)]
+    pub margin_bottom: Option<i32>,
+    #[serde(default)]
+    pub margin_left: Option<i32>,
+    #[serde(default)]
+    pub margin_right: Option<i32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -272,9 +286,10 @@ impl Config {
             .build()
     }
 
-    pub fn setup_windows(
+    pub async fn setup_windows(
         &self,
         app: &gtk4::Application,
+        event_emitter: EventEmitter,
     ) -> Result<Vec<gtk4::ApplicationWindow>, SkadiError> {
         let mut windows = Vec::new();
 
@@ -364,8 +379,42 @@ impl Config {
 
             config.anchor.apply(&window);
 
+            if let Some(margin) = config.margin_top {
+                window.set_margin(gtk4_layer_shell::Edge::Top, margin);
+            }
+            if let Some(margin) = config.margin_bottom {
+                window.set_margin(gtk4_layer_shell::Edge::Bottom, margin);
+            }
+            if let Some(margin) = config.margin_left {
+                window.set_margin(gtk4_layer_shell::Edge::Left, margin);
+            }
+            if let Some(margin) = config.margin_right {
+                window.set_margin(gtk4_layer_shell::Edge::Right, margin);
+            }
+
+            if matches!(config.layer, Layer::Background) {
+                // Set keyboard mode to none so it doesn't interfere with other windows
+                window.set_keyboard_mode(gtk4_layer_shell::KeyboardMode::None);
+
+                window.set_exclusive_zone(-1); // Changed from 0 to -1
+                window.set_anchor(gtk4_layer_shell::Edge::Top, true);
+                window.set_anchor(gtk4_layer_shell::Edge::Bottom, true);
+                window.set_anchor(gtk4_layer_shell::Edge::Left, true);
+                window.set_anchor(gtk4_layer_shell::Edge::Right, true);
+            }
+
             window.set_resizable(false);
             window.set_decorated(false);
+
+            let user_content_manager = webview
+                .user_content_manager()
+                .expect("WebView should have a UserContentManager");
+
+            user_content_manager.register_script_message_handler("exec", None);
+
+            event_emitter
+                .add_webview(config.label.clone(), SendWebView { webview })
+                .await;
 
             windows.push(window);
         }

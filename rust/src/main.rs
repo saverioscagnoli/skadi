@@ -1,15 +1,18 @@
 mod api;
 mod config;
 mod error;
+mod events;
 mod log;
 
-use crate::config::Config;
+use std::{collections::HashMap, sync::Arc};
+
+use crate::{config::Config, events::EventEmitter};
 use gtk4::{
     gdk,
     gio::prelude::{ApplicationExt, ApplicationExtManual},
     prelude::{GtkWindowExt, WidgetExt},
 };
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Mutex};
 use traccia::{fatal, info};
 
 #[tokio::main]
@@ -38,8 +41,13 @@ async fn main() {
 
     let dist = parent.join("dist");
 
+    let webviews_mutex = Arc::new(Mutex::new(HashMap::new()));
+    let event_emitter = EventEmitter::new(webviews_mutex.clone());
+
+    let event_emitter_clone = event_emitter.clone();
+
     tokio::spawn(async move {
-        if let Err(e) = api::asset_server(config.port, dist, ready_tx).await {
+        if let Err(e) = api::asset_server(config.port, dist, ready_tx, event_emitter_clone).await {
             fatal!("Failed to run server: {}", e);
             return;
         }
@@ -81,7 +89,11 @@ async fn main() {
     });
 
     app.connect_activate(move |app| {
-        let windows = match config.setup_windows(app) {
+        let config = config.clone();
+        let app = app.clone();
+        let event_emitter = event_emitter.clone();
+
+        let windows = match pollster::block_on(config.setup_windows(&app, event_emitter)) {
             Ok(w) => w,
             Err(e) => {
                 fatal!("Failed to setup window: {}", e);
