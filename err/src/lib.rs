@@ -22,4 +22,7 @@ pub enum SkadiError {
 
     #[error("Backend error: {0}")]
     BackendError(String),
+
+    #[error("Failed to initialize Vite workspace: {0}")]
+    ViteWorkspaceInit(String),
 }

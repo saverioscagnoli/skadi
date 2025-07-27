@@ -1,7 +1,5 @@
-use crate::{
-    error::SkadiError,
-    events::{EventEmitter, SendWebView},
-};
+use crate::events::{EventEmitter, SendWebView};
+use err::SkadiError;
 use gtk4::{
     gdk::{
         prelude::{DisplayExt, MonitorExt},

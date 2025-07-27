@@ -1,5 +1,5 @@
 [package]
-name = "skadi"
+name = "gtk"
 version = "0.1.0"
 edition = "2021"
 
@@ -12,7 +12,6 @@ traccia = "2.2.5"
 chrono = "0.4.41"
 serde = { version = "1.0.219", features = ["derive"] }
 dirs = "6.0.0"
-thiserror = "2.0.12"
 jsonc-parser = { version = "0.26.2", features = ["serde"] }
 serde_json = "1.0.141"
 tokio = { version = "1.46.1", features = ["full"] }
@@ -21,4 +20,4 @@ mime_guess = "2.0.5"
 tower-http = { version = "0.6.6", features = ["fs"] }
 pollster = "0.4.0"
 futures-util = "0.3.31"
-
+err = { path = "../err" }

@@ -1,6 +1,5 @@
 mod api;
 mod config;
-mod error;
 mod events;
 mod log;
 

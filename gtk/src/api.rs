@@ -1,4 +1,4 @@
-use crate::{error::SkadiError, events::EventEmitter};
+use crate::events::EventEmitter;
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
@@ -6,6 +6,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use err::SkadiError;
 use serde::Deserialize;
 use std::{path::PathBuf, process::Stdio};
 use tokio::{
