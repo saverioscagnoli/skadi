@@ -1,33 +1,38 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+import { homedir } from "os";
+import fs from "fs";
 import tsconfigPaths from "vite-tsconfig-paths";
 
-// @ts-expect-error process is a nodejs global
-const host = process.env.TAURI_DEV_HOST;
+const CONFIG_PATH = `${homedir()}/.config/skadi/config.json`;
 
-// https://vitejs.dev/config/
-export default defineConfig(async () => ({
-  plugins: [react(), tsconfigPaths()],
+type Config = {
+  windows: {
+    label: string;
+  }[];
+};
 
-  // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
-  //
-  // 1. prevent vite from obscuring rust errors
-  clearScreen: false,
-  // 2. tauri expects a fixed port, fail if that port is not available
-  server: {
-    port: 1420,
-    strictPort: true,
-    host: host || false,
-    hmr: host
-      ? {
-          protocol: "ws",
-          host,
-          port: 1421,
-        }
-      : undefined,
-    watch: {
-      // 3. tell vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
-    },
+function resolveHtmlEntryPoints(): string[] {
+  let raw = fs.readFileSync(CONFIG_PATH, "utf-8");
+  let config: Config = JSON.parse(raw);
+
+  return config.windows.map(w => `html/${w.label}.html`);
+}
+
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react(), tailwindcss(), tsconfigPaths()],
+  publicDir: `${homedir()}/.config/skadi/assets`,
+  build: {
+    rollupOptions: {
+      input: resolveHtmlEntryPoints(),
+    }
   },
-}));
+  server: {
+    fs: {
+      allow: [`${homedir()}/.config/skadi/plugins`]
+    }
+  }
+});
