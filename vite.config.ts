@@ -20,13 +20,14 @@ function resolveHtmlEntryPoints(): string[] {
   return config.windows.map(w => `html/${w.label}.html`);
 }
 
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss(), tsconfigPaths()],
   publicDir: `${homedir()}/.config/skadi/assets`,
   build: {
     rollupOptions: {
-      input: resolveHtmlEntryPoints()
+      input: resolveHtmlEntryPoints(),
     }
   },
   server: {
