@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "yarn generate-registry && vite build",
+    "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "generate-registry": "node scripts/generate-registry.js"

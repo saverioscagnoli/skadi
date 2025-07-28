@@ -1,5 +1,6 @@
+use err::{Result, SkadiError};
 use std::sync::LazyLock;
-use traccia::{fatal, info, warn};
+use traccia::{info, warn};
 
 enum Distro {
     Ubuntu,
@@ -27,192 +28,123 @@ impl Distro {
 
         Self::Unknown
     }
+
+    fn install_command(&self, package: &str) -> Option<String> {
+        match self {
+            Distro::Ubuntu => format!("sudo apt-get install -y {}", package).into(),
+            Distro::Fedora => format!("sudo dnf install -y {}", package).into(),
+            Distro::Arch => format!("sudo pacman -S --noconfirm {}", package).into(),
+            Distro::Unknown => None,
+        }
+    }
 }
 
 static DISTRO: LazyLock<Distro> = LazyLock::new(Distro::detect);
 
-async fn node_installed() -> bool {
-    let output = tokio::process::Command::new("node")
-        .arg("--version")
-        .output()
-        .await;
+pub struct Requirements;
 
-    match output {
-        Ok(o) => o.status.success(),
-        Err(_) => false,
+impl Requirements {
+    pub async fn check() -> Result<()> {
+        info!("Checking requirements...");
+
+        Self::check_node().await?;
+        Self::check_npm().await?;
+        Self::check_yarn().await?;
+
+        Ok(())
     }
-}
 
-async fn npm_installed() -> bool {
-    let output = tokio::process::Command::new("npm")
-        .arg("--version")
-        .output()
-        .await;
+    async fn node_installed() -> bool {
+        let output = tokio::process::Command::new("node")
+            .arg("--version")
+            .output()
+            .await;
 
-    match output {
-        Ok(o) => o.status.success(),
-        Err(_) => false,
-    }
-}
-
-async fn yarn_installed() -> bool {
-    let output = tokio::process::Command::new("yarn")
-        .arg("--version")
-        .output()
-        .await;
-
-    match output {
-        Ok(o) => o.status.success(),
-        Err(_) => false,
-    }
-}
-
-pub async fn node_check() {
-    warn!("Checking for Node.js installation...");
-
-    if !node_installed().await {
-        warn!("Node.js is not installed. Attempting to install...");
-
-        let result;
-
-        match *DISTRO {
-            Distro::Ubuntu => {
-                result = tokio::process::Command::new("sudo")
-                    .arg("apt-get")
-                    .arg("install")
-                    .arg("-y")
-                    .arg("nodejs")
-                    .output()
-                    .await;
-            }
-
-            Distro::Fedora => {
-                result = tokio::process::Command::new("sudo")
-                    .arg("dnf")
-                    .arg("install")
-                    .arg("-y")
-                    .arg("nodejs")
-                    .output()
-                    .await;
-            }
-
-            Distro::Arch => {
-                result = tokio::process::Command::new("sudo")
-                    .arg("pacman")
-                    .arg("-S")
-                    .arg("--noconfirm")
-                    .arg("nodejs")
-                    .output()
-                    .await;
-            }
-
-            Distro::Unknown => {
-                fatal!("Unsupported Linux distribution. Please install Node.js manually.");
-                return;
-            }
+        match output {
+            Ok(o) => o.status.success(),
+            Err(_) => false,
         }
+    }
 
-        let result = match result {
-            Ok(o) => o,
-            Err(e) => {
-                fatal!("Failed to install Node.js: {}", e);
-                return;
-            }
+    async fn npm_installed() -> bool {
+        let output = tokio::process::Command::new("npm")
+            .arg("--version")
+            .output()
+            .await;
+
+        match output {
+            Ok(o) => o.status.success(),
+            Err(_) => false,
+        }
+    }
+
+    async fn yarn_installed() -> bool {
+        let output = tokio::process::Command::new("yarn")
+            .arg("--version")
+            .output()
+            .await;
+
+        match output {
+            Ok(o) => o.status.success(),
+            Err(_) => false,
+        }
+    }
+
+    pub async fn install_node() -> Result<()> {
+        let Some(command) = DISTRO.install_command("nodejs") else {
+            return Err(SkadiError::RequirementsCheck(
+                "Unsupported Linux distribution".into(),
+            ));
         };
 
-        if !result.status.success() {
-            fatal!(
-                "Failed to install Node.js: {}",
-                String::from_utf8_lossy(&result.stderr)
-            );
-            return;
-        }
+        let result = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .output()
+            .await;
 
-        info!("Node.js installed successfully.");
-        npm_check().await;
-    } else {
-        info!("Node.js is installed.");
-    }
-}
-
-async fn npm_check() {
-    warn!("Checking for NPM installation...");
-
-    if !npm_installed().await {
-        warn!("NPM is not installed. Attempting to install...");
-
-        let result;
-
-        match *DISTRO {
-            Distro::Ubuntu => {
-                result = tokio::process::Command::new("sudo")
-                    .arg("apt-get")
-                    .arg("install")
-                    .arg("-y")
-                    .arg("npm")
-                    .output()
-                    .await;
-            }
-
-            Distro::Fedora => {
-                result = tokio::process::Command::new("sudo")
-                    .arg("dnf")
-                    .arg("install")
-                    .arg("-y")
-                    .arg("npm")
-                    .output()
-                    .await;
-            }
-
-            Distro::Arch => {
-                result = tokio::process::Command::new("sudo")
-                    .arg("pacman")
-                    .arg("-S")
-                    .arg("--noconfirm")
-                    .arg("npm")
-                    .output()
-                    .await;
-            }
-
-            Distro::Unknown => {
-                fatal!("Unsupported Linux distribution. Please install NPM manually.");
-                return;
-            }
-        }
-
-        let result = match result {
+        let output = match result {
             Ok(o) => o,
-            Err(e) => {
-                fatal!("Failed to install NPM: {}", e);
-                return;
-            }
+            Err(e) => return Err(SkadiError::RequirementsCheck(e.to_string())),
         };
 
-        if !result.status.success() {
-            fatal!(
-                "Failed to install NPM: {}",
-                String::from_utf8_lossy(&result.stderr)
-            );
-            return;
+        if !output.status.success() {
+            return Err(SkadiError::RequirementsCheck(
+                String::from_utf8_lossy(&output.stderr).into(),
+            ));
         }
 
-        info!("NPM installed successfully.");
-    } else {
-        info!("NPM is installed.");
+        Ok(())
     }
-}
 
-pub async fn yarn_check() {
-    warn!("Checking for Yarn installation...");
+    pub async fn install_npm() -> Result<()> {
+        let Some(command) = DISTRO.install_command("npm") else {
+            return Err(SkadiError::RequirementsCheck(
+                "Unsupported Linux distribution".into(),
+            ));
+        };
 
-    if !yarn_installed().await {
-        warn!("Yarn is not installed. Attempting to install...");
+        let result = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .output()
+            .await;
 
-        if !npm_installed().await {
-            warn!("NPM is not installed. Installing NPM first...");
-            npm_check().await;
+        let output = match result {
+            Ok(o) => o,
+            Err(e) => return Err(SkadiError::RequirementsCheck(e.to_string())),
+        };
+
+        if !output.status.success() {
+            return Err(SkadiError::RequirementsCheck(
+                String::from_utf8_lossy(&output.stderr).into(),
+            ));
         }
 
+        Ok(())
+    }
+
+    pub async fn install_yarn() -> Result<()> {
         let result = tokio::process::Command::new("sudo")
             .arg("npm")
             .arg("install")
@@ -221,24 +153,68 @@ pub async fn yarn_check() {
             .output()
             .await;
 
-        let result = match result {
+        let output = match result {
             Ok(o) => o,
-            Err(e) => {
-                fatal!("Failed to install Yarn: {}", e);
-                return;
-            }
+            Err(e) => return Err(SkadiError::RequirementsCheck(e.to_string())),
         };
 
-        if !result.status.success() {
-            fatal!(
-                "Failed to install Yarn: {}",
-                String::from_utf8_lossy(&result.stderr)
-            );
-            return;
+        if !output.status.success() {
+            return Err(SkadiError::RequirementsCheck(
+                String::from_utf8_lossy(&output.stderr).into(),
+            ));
         }
 
+        Ok(())
+    }
+
+    async fn check_node() -> Result<()> {
+        info!("Checking if Node.js is installed...");
+
+        if Self::node_installed().await {
+            info!("Node.js is installed.");
+            return Ok(());
+        }
+
+        warn!("Node.js is not installed. Attempting to install...");
+
+        Self::install_node().await?;
+
+        info!("Node.js installed successfully.");
+
+        Ok(())
+    }
+
+    async fn check_npm() -> Result<()> {
+        info!("Checking if npm is installed...");
+
+        if Self::npm_installed().await {
+            info!("npm is installed.");
+            return Ok(());
+        }
+
+        warn!("npm is not installed. Attempting to install...");
+
+        Self::install_npm().await?;
+
+        info!("npm installed successfully.");
+
+        Ok(())
+    }
+
+    async fn check_yarn() -> Result<()> {
+        info!("Checking if Yarn is installed...");
+
+        if Self::yarn_installed().await {
+            info!("Yarn is installed.");
+            return Ok(());
+        }
+
+        warn!("Yarn is not installed. Attempting to install...");
+
+        Self::install_yarn().await?;
+
         info!("Yarn installed successfully.");
-    } else {
-        info!("Yarn is installed.");
+
+        Ok(())
     }
 }

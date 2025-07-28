@@ -5,8 +5,11 @@ edition = "2024"
 
 [dependencies]
 traccia = "2.2.5"
-paths = { path = "../paths" }
+common = { path = "../common" }
 clap = { version = "4.5.41", features = ["derive"] }
 tokio = { version = "1.47.0", features = ["full"] }
 chrono = "0.4.41"
 err = { path = "../err" }
+phf = { version = "0.12.1", features = ["macros"] }
+futures = "0.3.31"
+textwrap = "0.16.2"

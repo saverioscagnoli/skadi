@@ -23,6 +23,11 @@ pub enum SkadiError {
     #[error("Backend error: {0}")]
     BackendError(String),
 
+    #[error("There was an error during requirements check: {0}")]
+    RequirementsCheck(String),
+
     #[error("Failed to initialize Vite workspace: {0}")]
     ViteWorkspaceInit(String),
 }
+
+pub type Result<T> = std::result::Result<T, SkadiError>;
