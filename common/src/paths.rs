@@ -1,7 +1,5 @@
 use std::{fs, path::PathBuf};
 
-use err::SkadiError;
-
 /// Return the path to the user configuration directory
 /// If the directory does not exist, it will be created.
 ///
@@ -71,16 +69,4 @@ pub fn plugins() -> Option<PathBuf> {
     fs::create_dir_all(&config).ok()?;
 
     Some(config)
-}
-
-pub fn possible_configs() -> Result<Vec<PathBuf>, SkadiError> {
-    let mut paths = Vec::new();
-
-    let d = config().ok_or(SkadiError::PathNotFound)?;
-
-    paths.push(d.join("config.json"));
-    paths.push(d.join("config.jsonc"));
-    paths.push(d.join("config.json5"));
-
-    Ok(paths)
 }

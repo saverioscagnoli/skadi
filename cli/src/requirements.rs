@@ -1,219 +1,93 @@
-use err::{Result, SkadiError};
-use std::sync::LazyLock;
-use traccia::{info, warn};
+use crate::{spawn_process_output, spawn_process_quiet};
+use anyhow::Result;
+use tokio::fs;
+use which::which;
 
-enum Distro {
-    Ubuntu,
-    Fedora,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Distro {
     Arch,
+    Debian,
+    Fedora,
+    Ubuntu,
     Unknown,
 }
 
 impl Distro {
-    fn detect() -> Self {
-        let os_release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
+    async fn detect_fallback() -> Self {
+        let Ok(output) = spawn_process_output("lsb_release", &["-is"], None).await else {
+            return Distro::Unknown;
+        };
 
-        for line in os_release.lines() {
-            if line.starts_with("ID=") {
-                let id = line.split('=').nth(1).unwrap_or("").trim_matches('"');
+        let distro = String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .to_lowercase();
 
-                return match id {
-                    "ubuntu" => Distro::Ubuntu,
-                    "fedora" => Distro::Fedora,
-                    "arch" => Distro::Arch,
-                    _ => Distro::Unknown,
-                };
-            }
+        match distro.as_str() {
+            "arch" => Distro::Arch,
+            "debian" => Distro::Debian,
+            "fedora" => Distro::Fedora,
+            "ubuntu" => Distro::Ubuntu,
+            _ => Distro::Unknown,
         }
-
-        Self::Unknown
     }
 
-    fn install_command(&self, package: &str) -> Option<String> {
+    pub async fn detect() -> Self {
+        let Ok(os_release) = fs::read_to_string("/etc/os-release").await else {
+            return Self::detect_fallback().await;
+        };
+
+        let Some(line) = os_release.lines().find(|l| l.starts_with("ID=")) else {
+            return Self::detect_fallback().await;
+        };
+
+        let id = line
+            .split('=')
+            .nth(1)
+            .unwrap_or("")
+            .trim_matches('"')
+            .to_lowercase();
+
+        match id.as_str() {
+            "arch" => Distro::Arch,
+            "debian" => Distro::Debian,
+            "fedora" => Distro::Fedora,
+            "ubuntu" => Distro::Ubuntu,
+            _ => Distro::Unknown,
+        }
+    }
+
+    pub fn install_command<T: AsRef<str>>(&self, package: T) -> String {
         match self {
-            Distro::Ubuntu => format!("sudo apt-get install -y {}", package).into(),
-            Distro::Fedora => format!("sudo dnf install -y {}", package).into(),
-            Distro::Arch => format!("sudo pacman -S --noconfirm {}", package).into(),
-            Distro::Unknown => None,
+            Distro::Arch => format!("sudo pacman -S --noconfirm {}", package.as_ref()),
+            Distro::Debian | Distro::Ubuntu => {
+                format!("sudo apt-get install -y {}", package.as_ref())
+            }
+            Distro::Fedora => format!("sudo dnf install -y {}", package.as_ref()),
+            Distro::Unknown => {
+                format!("echo 'Unknown distro, cannot install {}'", package.as_ref())
+            }
         }
     }
 }
 
-static DISTRO: LazyLock<Distro> = LazyLock::new(Distro::detect);
-
-pub struct Requirements;
+pub struct Requirements {
+    distro: Distro,
+}
 
 impl Requirements {
-    pub async fn check() -> Result<()> {
-        info!("Checking requirements...");
-
-        Self::check_node().await?;
-        Self::check_npm().await?;
-        Self::check_yarn().await?;
-
-        Ok(())
+    pub async fn new() -> Self {
+        let distro = Distro::detect().await;
+        Requirements { distro }
     }
 
-    async fn node_installed() -> bool {
-        let output = tokio::process::Command::new("node")
-            .arg("--version")
-            .output()
-            .await;
-
-        match output {
-            Ok(o) => o.status.success(),
-            Err(_) => false,
-        }
+    pub fn check<T: AsRef<str>>(&self, bin: T) -> bool {
+        which(bin.as_ref()).is_ok()
     }
 
-    async fn npm_installed() -> bool {
-        let output = tokio::process::Command::new("npm")
-            .arg("--version")
-            .output()
-            .await;
+    pub async fn install_package<T: AsRef<str>>(&self, package: T) -> Result<()> {
+        let command = self.distro.install_command(package);
 
-        match output {
-            Ok(o) => o.status.success(),
-            Err(_) => false,
-        }
-    }
-
-    async fn yarn_installed() -> bool {
-        let output = tokio::process::Command::new("yarn")
-            .arg("--version")
-            .output()
-            .await;
-
-        match output {
-            Ok(o) => o.status.success(),
-            Err(_) => false,
-        }
-    }
-
-    pub async fn install_node() -> Result<()> {
-        let Some(command) = DISTRO.install_command("nodejs") else {
-            return Err(SkadiError::RequirementsCheck(
-                "Unsupported Linux distribution".into(),
-            ));
-        };
-
-        let result = tokio::process::Command::new("sh")
-            .arg("-c")
-            .arg(command)
-            .output()
-            .await;
-
-        let output = match result {
-            Ok(o) => o,
-            Err(e) => return Err(SkadiError::RequirementsCheck(e.to_string())),
-        };
-
-        if !output.status.success() {
-            return Err(SkadiError::RequirementsCheck(
-                String::from_utf8_lossy(&output.stderr).into(),
-            ));
-        }
-
-        Ok(())
-    }
-
-    pub async fn install_npm() -> Result<()> {
-        let Some(command) = DISTRO.install_command("npm") else {
-            return Err(SkadiError::RequirementsCheck(
-                "Unsupported Linux distribution".into(),
-            ));
-        };
-
-        let result = tokio::process::Command::new("sh")
-            .arg("-c")
-            .arg(command)
-            .output()
-            .await;
-
-        let output = match result {
-            Ok(o) => o,
-            Err(e) => return Err(SkadiError::RequirementsCheck(e.to_string())),
-        };
-
-        if !output.status.success() {
-            return Err(SkadiError::RequirementsCheck(
-                String::from_utf8_lossy(&output.stderr).into(),
-            ));
-        }
-
-        Ok(())
-    }
-
-    pub async fn install_yarn() -> Result<()> {
-        let result = tokio::process::Command::new("sudo")
-            .arg("npm")
-            .arg("install")
-            .arg("-g")
-            .arg("yarn")
-            .output()
-            .await;
-
-        let output = match result {
-            Ok(o) => o,
-            Err(e) => return Err(SkadiError::RequirementsCheck(e.to_string())),
-        };
-
-        if !output.status.success() {
-            return Err(SkadiError::RequirementsCheck(
-                String::from_utf8_lossy(&output.stderr).into(),
-            ));
-        }
-
-        Ok(())
-    }
-
-    async fn check_node() -> Result<()> {
-        info!("Checking if Node.js is installed...");
-
-        if Self::node_installed().await {
-            info!("Node.js is installed.");
-            return Ok(());
-        }
-
-        warn!("Node.js is not installed. Attempting to install...");
-
-        Self::install_node().await?;
-
-        info!("Node.js installed successfully.");
-
-        Ok(())
-    }
-
-    async fn check_npm() -> Result<()> {
-        info!("Checking if npm is installed...");
-
-        if Self::npm_installed().await {
-            info!("npm is installed.");
-            return Ok(());
-        }
-
-        warn!("npm is not installed. Attempting to install...");
-
-        Self::install_npm().await?;
-
-        info!("npm installed successfully.");
-
-        Ok(())
-    }
-
-    async fn check_yarn() -> Result<()> {
-        info!("Checking if Yarn is installed...");
-
-        if Self::yarn_installed().await {
-            info!("Yarn is installed.");
-            return Ok(());
-        }
-
-        warn!("Yarn is not installed. Attempting to install...");
-
-        Self::install_yarn().await?;
-
-        info!("Yarn installed successfully.");
+        spawn_process_quiet("sh", &["-c", &command], None).await?;
 
         Ok(())
     }

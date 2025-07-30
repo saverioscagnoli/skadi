@@ -8,4 +8,4 @@ path = "cli"
 
 [workspace]
 default-members = ["cli"]
-members = ["cli", "gtk", "common", "err"]
+members = ["cli", "gtk", "common"]

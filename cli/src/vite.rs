@@ -1,139 +1,112 @@
-use common::{config::Config, paths};
-use err::{Result, SkadiError};
-use futures::future;
-use std::{
-    path::{Path, PathBuf},
-    process::Stdio,
+use crate::{registry::PluginRegistry, spawn_process, spawn_process_quiet, templates::Templates};
+use anyhow::{Result, anyhow};
+use common::{
+    config::{Config, Framework},
+    paths,
 };
+use std::path::{Path, PathBuf};
 use tokio::fs;
-use traccia::info;
-
-use crate::{
-    plugins::{Framework, PluginRegistry},
-    templates::TemplateManager,
-};
 
 pub struct ViteWorkspace {
-    plugin_registry: PluginRegistry,
-    dir: PathBuf,
+    root: PathBuf,
 }
 
 impl ViteWorkspace {
-    pub fn init<P: AsRef<Path>, Q: AsRef<Path>>(dir: P, plugin_dir: Q) -> Self {
-        let dir = dir.as_ref().to_path_buf();
-        let plugin_dir = plugin_dir.as_ref().to_path_buf();
-
-        info!("Initializng vite workspace at {}", dir.display());
-
-        Self {
-            plugin_registry: PluginRegistry::new(&plugin_dir),
-            dir,
+    pub fn new<P: AsRef<Path>>(path: P) -> Self {
+        ViteWorkspace {
+            root: path.as_ref().to_path_buf(),
         }
     }
 
-    pub async fn generate(&mut self, config: &Config) -> Result<()> {
-        info!("Writing necessary templates...");
+    pub async fn init(&self, config: &Config) -> Result<()> {
+        println!("Checking directories...");
+        self.check_directories().await?;
 
-        TemplateManager::write("package.json", &self.dir).await?;
-        TemplateManager::write("vite.config.js", &self.dir).await?;
-        TemplateManager::write("index.css", &self.dir).await?;
+        println!("Writing templates...");
+        Templates::write_all(&self.root).await?;
 
-        info!("Running a `yarn install`...");
+        println!("Running npm install...");
+        self.npm_install().await?;
 
-        self.yarn_install().await?;
+        println!("Generating indices...");
+        self.generate_html_indices(config).await?;
+        self.generate_jsx_indices(config).await?;
 
-        info!("Generating HTML and JSX indices...");
+        println!("Registering plugins...");
 
-        let mut handles = Vec::new();
+        let Some(plugin_directory) = paths::plugins() else {
+            return Err(anyhow!(
+                "Plugin directory not found. Please ensure plugins are set up correctly."
+            ));
+        };
 
+        let mut registry = PluginRegistry::new(&plugin_directory);
+
+        if let Err(e) = registry.init().await {
+            return Err(anyhow!("Failed to initialize plugin registry: {}", e));
+        }
+
+        println!("Writing plugin registry...");
+        let path = self.root.join("registry.js");
+        registry.write(&path, Framework::React).await?;
+
+        println!("Running prettier...");
+
+        if let Err(_) = spawn_process_quiet("npm", &["run", "format"], Some(&self.root)).await {
+            eprintln!("Failed to run prettier. Output will be ugly :(",);
+        }
+
+        println!("Running vite build...");
+        self.vite_build().await?;
+
+        println!("Project built!");
+
+        Ok(())
+    }
+
+    async fn check_directories(&self) -> Result<()> {
+        fs::create_dir_all(self.root.join("html")).await?;
+        fs::create_dir_all(self.root.join("jsx")).await?;
+
+        Ok(())
+    }
+
+    async fn npm_install(&self) -> Result<()> {
+        let status = spawn_process_quiet("npm", &["install"], Some(&self.root)).await?;
+
+        if !status.success() {
+            return Err(anyhow!("npm install failed with status: {}", status));
+        }
+
+        Ok(())
+    }
+
+    async fn generate_html_indices(&self, config: &Config) -> Result<()> {
         for wc in &config.windows {
-            let label_html = wc.label.clone();
-            let label_jsx = wc.label.clone();
+            let content = Templates::html_index(&wc.label);
+            let path = self.root.join("html").join(format!("{}.html", wc.label));
 
-            let html_handle = tokio::spawn(async move {
-                let html = PluginRegistry::gen_html_index(&label_html);
-                let file_path = paths::html_indices()
-                    .ok_or(SkadiError::ViteWorkspaceInit(
-                        "Failed to find or create HTML indices directory".to_string(),
-                    ))
-                    .unwrap()
-                    .join(format!("{}.html", label_html));
-
-                fs::write(&file_path, html)
-                    .await
-                    .map_err(|e| SkadiError::ViteWorkspaceInit(e.to_string()))
-                    .unwrap();
-            });
-
-            let jsx_handle = tokio::spawn(async move {
-                let jsx = PluginRegistry::gen_jsx_index(&label_jsx);
-
-                let file_path = paths::jsx_indices()
-                    .ok_or(SkadiError::ViteWorkspaceInit(
-                        "Failed to find or create JSX indices directory".to_string(),
-                    ))
-                    .unwrap()
-                    .join(format!("{}.jsx", label_jsx));
-
-                fs::write(&file_path, jsx)
-                    .await
-                    .map_err(|e| SkadiError::ViteWorkspaceInit(e.to_string()))
-                    .unwrap();
-            });
-
-            handles.push(html_handle);
-            handles.push(jsx_handle);
-        }
-
-        future::join_all(handles).await;
-
-        info!("Generating plugin registry...");
-
-        self.plugin_registry.register_all().await?;
-        self.plugin_registry
-            .write(&self.dir.join("registry.js"), Framework::React)
-            .await?;
-
-        info!("Running a `yarn build`...");
-
-        self.yarn_build().await?;
-
-        info!("Project built successfully!");
-
-        Ok(())
-    }
-
-    async fn yarn_build(&self) -> Result<()> {
-        let status = tokio::process::Command::new("yarn")
-            .arg("build")
-            .current_dir(&self.dir)
-            .status()
-            .await
-            .map_err(|e| SkadiError::ViteWorkspaceInit(e.to_string()))?;
-
-        if !status.success() {
-            return Err(SkadiError::ViteWorkspaceInit(
-                "Failed to run `yarn build`".to_string(),
-            ));
+            fs::write(path, content).await?;
         }
 
         Ok(())
     }
 
-    async fn yarn_install(&self) -> Result<()> {
-        let status = tokio::process::Command::new("yarn")
-            .arg("install")
-            .current_dir(&self.dir)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await
-            .map_err(|e| SkadiError::ViteWorkspaceInit(e.to_string()))?;
+    async fn generate_jsx_indices(&self, config: &Config) -> Result<()> {
+        for wc in &config.windows {
+            let content = Templates::jsx_index(&wc.label);
+            let path = self.root.join("jsx").join(format!("{}.jsx", wc.label));
+
+            fs::write(path, content).await?;
+        }
+        Ok(())
+    }
+
+    async fn vite_build(&self) -> Result<()> {
+        let status = spawn_process("npm", &["run", "build"], Some(&self.root)).await?;
 
         if !status.success() {
-            return Err(SkadiError::ViteWorkspaceInit(
-                "Failed to run `yarn install`".to_string(),
-            ));
+            return Err(anyhow!("vite build failed with status: {}", status));
         }
 
         Ok(())

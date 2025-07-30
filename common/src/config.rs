@@ -1,4 +1,4 @@
-use err::SkadiError;
+use anyhow::{Result, anyhow};
 use gtk4_layer_shell::LayerShell;
 use serde::{
     Deserialize, Deserializer,
@@ -162,6 +162,35 @@ impl From<Layer> for gtk4_layer_shell::Layer {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Framework {
+    React,
+    Vue,
+    Svelte,
+    Solid,
+    Vanilla,
+}
+
+impl<'de> Deserialize<'de> for Framework {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.to_lowercase().as_str() {
+            "react" => Ok(Framework::React),
+            "vue" => Ok(Framework::Vue),
+            "svelte" => Ok(Framework::Svelte),
+            "solid" => Ok(Framework::Solid),
+            "vanilla" => Ok(Framework::Vanilla),
+            _ => Err(serde::de::Error::custom(format!(
+                "Unknown framework: {}",
+                s
+            ))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct WindowConfig {
     pub monitor: String,
@@ -207,28 +236,33 @@ impl Config {
         false
     }
 
-    pub fn parse() -> Result<Self, SkadiError> {
-        let paths = paths::possible_configs()?;
+    pub fn parse() -> Result<Self> {
+        let path = paths::config()
+            .map(|p| p.join("config.json"))
+            .ok_or_else(|| anyhow!("Could not find or create configuration directory"))?;
 
-        for path in &paths {
-            if path.exists() {
-                let content = fs::read_to_string(&path)?;
-                let value = jsonc_parser::parse_to_serde_value(
-                    &content,
-                    &jsonc_parser::ParseOptions::default(),
-                )
-                .map_err(|e| SkadiError::ConfigParsing(path.clone(), e.to_string()))?
-                .ok_or_else(|| {
-                    SkadiError::ConfigParsing(path.clone(), "No value returned".to_string())
-                })?;
-
-                let config: Config = serde_json::from_value(value)
-                    .map_err(|e| SkadiError::ConfigParsing(path.clone(), e.to_string()))?;
-
-                return Ok(config);
+        let content = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                return Err(anyhow!(
+                    "Failed to read config file {}: {}",
+                    path.display(),
+                    e
+                ));
             }
-        }
+        };
 
-        Err(SkadiError::ConfigNotSpecified(paths))
+        let config = match serde_json::from_str(&content) {
+            Ok(c) => c,
+            Err(e) => {
+                return Err(anyhow!(
+                    "Failed to parse config file {}: {}",
+                    path.display(),
+                    e
+                ));
+            }
+        };
+
+        Ok(config)
     }
 }

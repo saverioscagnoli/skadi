@@ -4,12 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-traccia = "2.2.5"
 common = { path = "../common" }
 clap = { version = "4.5.41", features = ["derive"] }
 tokio = { version = "1.47.0", features = ["full"] }
-chrono = "0.4.41"
-err = { path = "../err" }
 phf = { version = "0.12.1", features = ["macros"] }
-futures = "0.3.31"
-textwrap = "0.16.2"
+which = "8.0.0"
+anyhow = "1.0.98"
+chrono = "0.4.41"

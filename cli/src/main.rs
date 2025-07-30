@@ -1,149 +1,144 @@
-mod plugins;
+mod registry;
 mod requirements;
 mod templates;
 mod vite;
 
+use crate::{requirements::Requirements, vite::ViteWorkspace};
+use anyhow::Result;
 use clap::Parser;
 use common::{config::Config, paths};
-use traccia::{Color, Colorize, LogLevel, Style, fatal, warn};
-
-use crate::{requirements::Requirements, vite::ViteWorkspace};
-
-struct CustomFormatter;
-
-impl traccia::Formatter for CustomFormatter {
-    fn format(&self, record: &traccia::Record) -> String {
-        let timestamp = chrono::Local::now().format("%b %d %H:%M:%S").to_string();
-
-        format!(
-            "{} [{}] {}: {}",
-            timestamp.color(Color::Cyan).dim(),
-            record.target.dim(),
-            record.level.default_coloring().to_lowercase(),
-            record.message
-        )
-    }
-}
-
-fn log_level() -> LogLevel {
-    if cfg!(debug_assertions) {
-        LogLevel::Debug
-    } else {
-        LogLevel::Info
-    }
-}
+use std::{
+    path::PathBuf,
+    process::{ExitStatus, Output, Stdio},
+};
 
 #[derive(Debug, Clone, Parser)]
-enum Command {
+pub enum Command {
     Generate,
-
-    Dev,
 }
 
 #[derive(Debug, Clone, Parser)]
 struct Args {
-    /// Skip requirements checks
-    #[clap(long, default_value_t = false)]
-    skip_checks: bool,
-
     #[clap(subcommand)]
     command: Command,
 }
 
-// #[tokio::main]
-// async fn main() {
-//     traccia::init_with_config(traccia::Config {
-//         level: log_level(),
-//         format: Some(Box::new(CustomFormatter)),
-//         ..Default::default()
-//     });
-
-//     let args = Args::parse();
-
-//     let config = match Config::parse() {
-//         Ok(c) => c,
-//         Err(e) => {
-//             fatal!("Failed to parse configuration: {}", e);
-//             return;
-//         }
-//     };
-
-//     match args.command {
-//         Command::Init { skip_checks } => {
-//             if !skip_checks {
-//                 requirements::node_check().await;
-//                 requirements::yarn_check().await;
-//             } else {
-//                 warn!("Skipping requirements checks as requested.");
-//             }
-
-//             if let Err(e) = vite::init_workspace().await {
-//                 fatal!("Failed to initialize workspace: {}", e);
-//                 return;
-//             }
-//         }
-
-//         Command::Generate => {
-//             if let Err(e) = vite::generate(&config).await {
-//                 fatal!("Failed to generate workspace: {}", e);
-//                 return;
-//             }
-//         }
-
-//         Command::Dev => {
-//             if let Err(e) = vite::run_dev().await {
-//                 fatal!("Failed to run development server: {}", e);
-//                 return;
-//             }
-//         }
-//     }
-// }
-
 #[tokio::main]
 async fn main() {
-    traccia::init_with_config(traccia::Config {
-        level: log_level(),
-        format: Some(Box::new(CustomFormatter)),
-        ..Default::default()
-    });
-
     let args = Args::parse();
 
-    if !args.skip_checks
-        && let Err(e) = Requirements::check().await
-    {
-        fatal!("Requirements check failed: {}", e);
-        return;
-    }
+    println!("Parsing configuration...");
 
     let config = match Config::parse() {
         Ok(c) => c,
         Err(e) => {
-            fatal!("Failed to parse configuration: {}", e);
+            eprintln!("{}", e);
             return;
         }
     };
 
-    let Some(local) = paths::local() else {
-        fatal!("Failed to find or create local directory `~/.local/share/skadi`");
-        return;
-    };
+    println!("Checking requirements...");
 
-    let Some(plugins) = paths::plugins() else {
-        fatal!("Failed to find or create plugins directory");
-        return;
-    };
+    let req = Requirements::new().await;
 
-    let mut vite = ViteWorkspace::init(&local, &plugins);
+    if !req.check("node") {
+        println!("Node.js is not installed. Attempting to install...");
 
-    match args.command {
-        Command::Generate => {
-            if let Err(e) = vite.generate(&config).await {
-                fatal!("{}", e);
-                return;
-            }
+        if let Err(e) = req.install_package("nodejs").await {
+            eprintln!("Failed to install Node.js: {}", e);
+            return;
         }
 
-        _ => {}
+        println!("Node.js installed successfully.");
+    } else {
+        println!("Node.js is installed.");
     }
+
+    if !req.check("npm") {
+        println!("npm is not installed. Attempting to install...");
+
+        if let Err(e) = req.install_package("npm").await {
+            eprintln!("Failed to install npm: {}", e);
+            return;
+        }
+
+        println!("npm installed successfully.");
+    } else {
+        println!("npm is installed.");
+    }
+
+    let Some(root) = paths::local() else {
+        eprintln!("Failed to find the root path for the project.");
+        return;
+    };
+
+    let vite = ViteWorkspace::new(root);
+
+    if let Err(e) = vite.init(&config).await {
+        eprintln!("Failed to initialize Vite workspace: {}", e);
+        return;
+    }
+
+    match args.command {
+        Command::Generate => {}
+    }
+}
+
+pub async fn spawn_process<T: AsRef<str>>(
+    cmd: T,
+    args: &[&str],
+    path: Option<&PathBuf>,
+) -> Result<ExitStatus> {
+    let path = path.map(|p| p.as_path());
+    let mut builder = tokio::process::Command::new(cmd.as_ref());
+
+    if let Some(path) = path {
+        builder.current_dir(path);
+    }
+
+    builder.args(args);
+
+    let status = builder.status().await?;
+
+    Ok(status)
+}
+
+pub async fn spawn_process_quiet<T: AsRef<str>>(
+    cmd: T,
+    args: &[&str],
+    path: Option<&PathBuf>,
+) -> Result<ExitStatus> {
+    let path = path.map(|p| p.as_path());
+    let mut builder = tokio::process::Command::new(cmd.as_ref());
+
+    if let Some(path) = path {
+        builder.current_dir(path);
+    }
+
+    builder.args(args);
+    builder.stdout(Stdio::null());
+    builder.stderr(Stdio::null());
+
+    let status = builder.status().await?;
+
+    Ok(status)
+}
+
+pub async fn spawn_process_output<T: AsRef<str>>(
+    cmd: T,
+    args: &[&str],
+    path: Option<&PathBuf>,
+) -> Result<Output> {
+    let path = path.map(|p| p.as_path());
+    let mut builder = tokio::process::Command::new(cmd.as_ref());
+
+    if let Some(path) = path {
+        builder.current_dir(path);
+    }
+
+    builder.args(args);
+
+    let output = builder.output().await?;
+
+    Ok(output)
 }

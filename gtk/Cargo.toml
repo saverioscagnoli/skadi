@@ -20,4 +20,3 @@ mime_guess = "2.0.5"
 tower-http = { version = "0.6.6", features = ["fs"] }
 pollster = "0.4.0"
 futures-util = "0.3.31"
-err = { path = "../err" }

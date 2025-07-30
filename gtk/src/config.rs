@@ -54,7 +54,6 @@ impl Paths {
 
 
 
-
     pub fn create_app(&self) -> gtk4::Application {
         gtk4::Application::builder()
             .application_id(&self.app_id)
