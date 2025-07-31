@@ -14,14 +14,18 @@ use std::{
 };
 
 #[derive(Debug, Clone, Parser)]
-pub enum Command {
-    Generate,
-}
-
-#[derive(Debug, Clone, Parser)]
 struct Args {
-    #[clap(subcommand)]
-    command: Command,
+    /// Skip the build process
+    #[arg(short = 's', long, action = clap::ArgAction::SetTrue, conflicts_with = "build_only")]
+    skip_build: bool,
+
+    /// Skip requirements check
+    #[arg(short = 'r', long, action = clap::ArgAction::SetTrue)]
+    skip_requirements: bool,
+
+    /// Only build, don't run
+    #[arg(short = 'b', long, action = clap::ArgAction::SetTrue, conflicts_with = "skip_build")]
+    build_only: bool,
 }
 
 #[tokio::main]
@@ -41,32 +45,64 @@ async fn main() {
         }
     };
 
-    spinner.update_message("Checking requirements...");
+    if !args.skip_requirements {
+        spinner.update_message("Checking requirements...");
 
-    let req = Requirements::new().await;
-    let mut root_granted = false;
+        let req = Requirements::new().await;
+        let mut root_granted = false;
 
-    if !req.check("node") {
-        if !req.check_root() {
-            spinner.finish_with_symbol_and_message(
-                "⚠️",
-                format!(
-                    "Please enter root password to install Node.js. This command will run:\n{}",
-                    req.distro.install_command("nodejs")
-                )
-                .as_str(),
-            );
+        if !req.check("node") {
+            if !req.check_root() {
+                spinner.finish_with_symbol_and_message(
+                    "⚠️",
+                    format!(
+                        "Please enter root password to install Node.js. This command will run:\n{}",
+                        req.distro.install_command("nodejs")
+                    )
+                    .as_str(),
+                );
 
-            if let Ok(status) = spawn_process_quiet("sudo", &["-v"], None).await {
-                if status.success() {
-                    root_granted = true;
+                if let Ok(status) = spawn_process_quiet("sudo", &["-v"], None).await {
+                    if status.success() {
+                        root_granted = true;
+                    } else {
+                        eprintln!("Failed to run sudo command.");
+                        return;
+                    }
                 } else {
                     eprintln!("Failed to run sudo command.");
                     return;
                 }
-            } else {
-                eprintln!("Failed to run sudo command.");
+
+                print!("\x1B[1A\x1B[2K");
+                spinner = Spinner::new()
+                    .with_message("Installing Node.js...")
+                    .with_delay(std::time::Duration::from_millis(100))
+                    .start();
+            }
+
+            if let Err(e) = req.install_package("nodejs").await {
+                eprintln!("Failed to install Node.js: {}", e);
                 return;
+            }
+
+            spinner.update_message("Node.js installed successfully.");
+        } else {
+            spinner.update_message("Node.js is installed.");
+        }
+
+        if !req.check("npm") {
+            if !root_granted && !req.check_root() {
+                spinner.finish_with_symbol_and_message(
+                    "⚠️",
+                    format!(
+                        "Please enter root password to install Node.js. This command will run:\n{}",
+                        req.distro.install_command("npm")
+                    )
+                    .as_str(),
+                );
+
+                spawn_process_quiet("sudo", &["-v"], None).await.ok();
             }
 
             print!("\x1B[1A\x1B[2K");
@@ -74,46 +110,21 @@ async fn main() {
                 .with_message("Installing Node.js...")
                 .with_delay(std::time::Duration::from_millis(100))
                 .start();
-        }
 
-        if let Err(e) = req.install_package("nodejs").await {
-            eprintln!("Failed to install Node.js: {}", e);
-            return;
-        }
+            if let Err(e) = req.install_package("npm").await {
+                eprintln!("Failed to install npm: {}", e);
+                return;
+            }
 
-        spinner.update_message("Node.js installed successfully.");
+            spinner.update_message("npm installed successfully.");
+        } else {
+            spinner.update_message("npm is installed.");
+        }
     } else {
-        spinner.update_message("Node.js is installed.");
-    }
-
-    if !req.check("npm") {
-        if !root_granted && !req.check_root() {
-            spinner.finish_with_symbol_and_message(
-                "⚠️",
-                format!(
-                    "Please enter root password to install Node.js. This command will run:\n{}",
-                    req.distro.install_command("npm")
-                )
-                .as_str(),
-            );
-
-            spawn_process_quiet("sudo", &["-v"], None).await.ok();
-        }
-
-        print!("\x1B[1A\x1B[2K");
-        spinner = Spinner::new()
-            .with_message("Installing Node.js...")
-            .with_delay(std::time::Duration::from_millis(100))
-            .start();
-
-        if let Err(e) = req.install_package("npm").await {
-            eprintln!("Failed to install npm: {}", e);
-            return;
-        }
-
-        spinner.update_message("npm installed successfully.");
-    } else {
-        spinner.update_message("npm is installed.");
+        spinner.finish_with_symbol_and_message(
+            "⚠️",
+            "Skipping requirements check. Make sure to have Node.js and npm installed.",
+        );
     }
 
     let Some(root) = paths::local() else {
@@ -121,17 +132,22 @@ async fn main() {
         return;
     };
 
-    let vite = ViteWorkspace::new(root);
+    if !args.skip_build {
+        let vite = ViteWorkspace::new(root);
 
-    if let Err(e) = vite.init(&config, spinner).await {
-        eprintln!("Failed to initialize Vite workspace: {}", e);
-        return;
+        if let Err(e) = vite.init(&config, spinner).await {
+            eprintln!("Failed to initialize Vite workspace: {}", e);
+            return;
+        }
+    } else {
+        spinner.finish_with_symbol_and_message(
+            "⚠️",
+            "Skipping build process. Make sure to run `skadi build` before running the application with this flag.",
+        );
     }
 
-    match args.command {
-        Command::Generate => {
-            gtk::run(config);
-        }
+    if !args.build_only {
+        gtk::run(config);
     }
 }
 

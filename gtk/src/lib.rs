@@ -63,7 +63,7 @@ pub fn run(config: Config) {
 
     let app = config.create_app();
 
-    app.connect_startup(|app| {
+    app.connect_startup(|_app| {
         let provider = gtk4::CssProvider::new();
         let css_str = r"
             window {
@@ -71,6 +71,7 @@ pub fn run(config: Config) {
             }            
         ";
 
+        info!("Injecting css...");
         provider.load_from_string(css_str);
 
         gtk4::style_context_add_provider_for_display(
@@ -83,8 +84,6 @@ pub fn run(config: Config) {
             settings.set_gtk_theme_name(Some(""));
             settings.set_gtk_icon_theme_name(Some(""));
         }
-
-        app.activate();
     });
 
     app.connect_activate(move |app| {
@@ -108,5 +107,5 @@ pub fn run(config: Config) {
         }
     });
 
-    app.run();
+    app.run_with_args(&Vec::<String>::new());
 }
