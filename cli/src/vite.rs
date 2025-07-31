@@ -61,7 +61,7 @@ impl ViteWorkspace {
         spinner.update_message("Running vite build...");
         self.vite_build().await?;
 
-        spinner.finish_with_symbol_and_message("🪄", "Project built!");
+        spinner.finish_with_symbol_and_message("🪄", "Frontend built!");
 
         Ok(())
     }

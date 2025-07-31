@@ -56,6 +56,8 @@ pub fn setup_logging() {
 pub fn run(config: Config) {
     setup_logging();
 
+    info!("Using configuration {}", Config::path().display());
+
     if let Err(e) = gtk4::init() {
         fatal!("Failed to initialize GTK: {}", e);
         return;

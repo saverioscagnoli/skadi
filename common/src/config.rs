@@ -4,7 +4,7 @@ use serde::{
     Deserialize, Deserializer,
     de::{self, Visitor},
 };
-use std::{fmt, fs};
+use std::{fmt, fs, path::PathBuf};
 
 use crate::paths;
 
@@ -234,6 +234,12 @@ impl Config {
 
     pub fn default_exclusive() -> bool {
         false
+    }
+
+    pub fn path() -> PathBuf {
+        paths::config()
+            .map(|p| p.join("config.json"))
+            .unwrap_or_else(|| PathBuf::from("config.json"))
     }
 
     pub fn parse() -> Result<Self> {
