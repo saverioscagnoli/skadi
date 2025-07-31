@@ -16,4 +16,4 @@ which = "8.0.0"
 anyhow = "1.0.98"
 chrono = "0.4.41"
 gtk = { path = "../gtk" }
-indicatif = "0.18.0"
+nix = { version = "0.30.1", features = ["user"] }

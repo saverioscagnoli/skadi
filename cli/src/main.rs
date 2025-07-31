@@ -1,9 +1,10 @@
 mod registry;
 mod requirements;
+mod spinner;
 mod templates;
 mod vite;
 
-use crate::{requirements::Requirements, vite::ViteWorkspace};
+use crate::{requirements::Requirements, spinner::Spinner, vite::ViteWorkspace};
 use anyhow::Result;
 use clap::Parser;
 use common::{config::Config, paths};
@@ -27,7 +28,10 @@ struct Args {
 async fn main() {
     let args = Args::parse();
 
-    println!("Parsing configuration...");
+    let mut spinner = Spinner::new()
+        .with_message("Parsing configuration...")
+        .with_delay(std::time::Duration::from_millis(100))
+        .start();
 
     let config = match Config::parse() {
         Ok(c) => c,
@@ -37,34 +41,79 @@ async fn main() {
         }
     };
 
-    println!("Checking requirements...");
+    spinner.update_message("Checking requirements...");
 
     let req = Requirements::new().await;
+    let mut root_granted = false;
 
     if !req.check("node") {
-        println!("Node.js is not installed. Attempting to install...");
+        if !req.check_root() {
+            spinner.finish_with_symbol_and_message(
+                "⚠️",
+                format!(
+                    "Please enter root password to install Node.js. This command will run:\n{}",
+                    req.distro.install_command("nodejs")
+                )
+                .as_str(),
+            );
+
+            if let Ok(status) = spawn_process_quiet("sudo", &["-v"], None).await {
+                if status.success() {
+                    root_granted = true;
+                } else {
+                    eprintln!("Failed to run sudo command.");
+                    return;
+                }
+            } else {
+                eprintln!("Failed to run sudo command.");
+                return;
+            }
+
+            print!("\x1B[1A\x1B[2K");
+            spinner = Spinner::new()
+                .with_message("Installing Node.js...")
+                .with_delay(std::time::Duration::from_millis(100))
+                .start();
+        }
 
         if let Err(e) = req.install_package("nodejs").await {
             eprintln!("Failed to install Node.js: {}", e);
             return;
         }
 
-        println!("Node.js installed successfully.");
+        spinner.update_message("Node.js installed successfully.");
     } else {
-        println!("Node.js is installed.");
+        spinner.update_message("Node.js is installed.");
     }
 
     if !req.check("npm") {
-        println!("npm is not installed. Attempting to install...");
+        if !root_granted && !req.check_root() {
+            spinner.finish_with_symbol_and_message(
+                "⚠️",
+                format!(
+                    "Please enter root password to install Node.js. This command will run:\n{}",
+                    req.distro.install_command("npm")
+                )
+                .as_str(),
+            );
+
+            spawn_process_quiet("sudo", &["-v"], None).await.ok();
+        }
+
+        print!("\x1B[1A\x1B[2K");
+        spinner = Spinner::new()
+            .with_message("Installing Node.js...")
+            .with_delay(std::time::Duration::from_millis(100))
+            .start();
 
         if let Err(e) = req.install_package("npm").await {
             eprintln!("Failed to install npm: {}", e);
             return;
         }
 
-        println!("npm installed successfully.");
+        spinner.update_message("npm installed successfully.");
     } else {
-        println!("npm is installed.");
+        spinner.update_message("npm is installed.");
     }
 
     let Some(root) = paths::local() else {
@@ -74,7 +123,7 @@ async fn main() {
 
     let vite = ViteWorkspace::new(root);
 
-    if let Err(e) = vite.init(&config).await {
+    if let Err(e) = vite.init(&config, spinner).await {
         eprintln!("Failed to initialize Vite workspace: {}", e);
         return;
     }
@@ -84,25 +133,6 @@ async fn main() {
             gtk::run(config);
         }
     }
-}
-
-pub async fn spawn_process<T: AsRef<str>>(
-    cmd: T,
-    args: &[&str],
-    path: Option<&PathBuf>,
-) -> Result<ExitStatus> {
-    let path = path.map(|p| p.as_path());
-    let mut builder = tokio::process::Command::new(cmd.as_ref());
-
-    if let Some(path) = path {
-        builder.current_dir(path);
-    }
-
-    builder.args(args);
-
-    let status = builder.status().await?;
-
-    Ok(status)
 }
 
 pub async fn spawn_process_quiet<T: AsRef<str>>(

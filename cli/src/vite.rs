@@ -1,4 +1,6 @@
-use crate::{registry::PluginRegistry, spawn_process, spawn_process_quiet, templates::Templates};
+use crate::{
+    registry::PluginRegistry, spawn_process_quiet, spinner::SpinnerHandle, templates::Templates,
+};
 use anyhow::{Result, anyhow};
 use common::{
     config::{Config, Framework},
@@ -18,21 +20,21 @@ impl ViteWorkspace {
         }
     }
 
-    pub async fn init(&self, config: &Config) -> Result<()> {
-        println!("Checking directories...");
+    pub async fn init(&self, config: &Config, mut spinner: SpinnerHandle) -> Result<()> {
+        spinner.update_message("Checking directories...");
         self.check_directories().await?;
 
-        println!("Writing templates...");
+        spinner.update_message("Writing templates...");
         Templates::write_all(&self.root).await?;
 
-        println!("Running npm install...");
+        spinner.update_message("Running npm install...");
         self.npm_install().await?;
 
-        println!("Generating indices...");
+        spinner.update_message("Generating indices...");
         self.generate_html_indices(config).await?;
         self.generate_jsx_indices(config).await?;
 
-        println!("Registering plugins...");
+        spinner.update_message("Registering plugins...");
 
         let Some(plugin_directory) = paths::plugins() else {
             return Err(anyhow!(
@@ -46,20 +48,20 @@ impl ViteWorkspace {
             return Err(anyhow!("Failed to initialize plugin registry: {}", e));
         }
 
-        println!("Writing plugin registry...");
+        spinner.update_message("Writing plugin registry...");
         let path = self.root.join("registry.js");
         registry.write(&path, Framework::React).await?;
 
-        println!("Running prettier...");
+        spinner.update_message("Running prettier...");
 
         if let Err(_) = spawn_process_quiet("npm", &["run", "format"], Some(&self.root)).await {
             eprintln!("Failed to run prettier. Output will be ugly :(",);
         }
 
-        println!("Running vite build...");
+        spinner.update_message("Running vite build...");
         self.vite_build().await?;
 
-        println!("Project built!");
+        spinner.finish_with_symbol_and_message("🪄", "Project built!");
 
         Ok(())
     }
@@ -119,7 +121,7 @@ impl ViteWorkspace {
     }
 
     async fn vite_build(&self) -> Result<()> {
-        let status = spawn_process("npm", &["run", "build"], Some(&self.root)).await?;
+        let status = spawn_process_quiet("npm", &["run", "build"], Some(&self.root)).await?;
 
         if !status.success() {
             return Err(anyhow!("vite build failed with status: {}", status));

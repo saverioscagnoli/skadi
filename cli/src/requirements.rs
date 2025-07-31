@@ -1,5 +1,6 @@
 use crate::{spawn_process_output, spawn_process_quiet};
 use anyhow::Result;
+use nix::unistd::Uid;
 use tokio::fs;
 use which::which;
 
@@ -70,8 +71,12 @@ impl Distro {
     }
 }
 
+unsafe impl Send for Requirements {}
+unsafe impl Sync for Requirements {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Requirements {
-    distro: Distro,
+    pub distro: Distro,
 }
 
 impl Requirements {
@@ -84,6 +89,10 @@ impl Requirements {
         which(bin.as_ref()).is_ok()
     }
 
+    pub fn check_root(&self) -> bool {
+        Uid::effective().is_root()
+    }
+
     pub async fn install_package<T: AsRef<str>>(&self, package: T) -> Result<()> {
         let command = self.distro.install_command(package);
 
@@ -92,3 +101,6 @@ impl Requirements {
         Ok(())
     }
 }
+
+unsafe impl Send for Distro {}
+unsafe impl Sync for Distro {}
