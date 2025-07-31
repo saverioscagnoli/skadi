@@ -1,0 +1,11 @@
+[package]
+name = "skadi"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "cli"
+
+[workspace]
+default-members = ["cli"]
+members = ["cli", "gtk", "common"]
