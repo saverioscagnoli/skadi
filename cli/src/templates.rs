@@ -44,7 +44,7 @@ impl Templates {
         )
     }
 
-    pub fn jsx_index<L: AsRef<str>>(label: L) -> String {
+    pub fn jsx_index<L: AsRef<str>>(label: L, styles: &Vec<String>) -> String {
         let label = label.as_ref();
 
         format!(
@@ -54,6 +54,8 @@ impl Templates {
             // import {{ exec, useListen }} from "../util.js";
 
             import "../index.css";
+
+            {}
 
             const LABEL = "{}"; 
 
@@ -65,7 +67,13 @@ impl Templates {
               </div>
             );
             "#,
-            label, label
+            styles
+                .iter()
+                .map(|p| format!("import \"{}\";", p))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            label,
+            label
         )
     }
 

@@ -80,7 +80,9 @@ async fn main() {
     }
 
     match args.command {
-        Command::Generate => {}
+        Command::Generate => {
+            gtk::run(config);
+        }
     }
 }
 

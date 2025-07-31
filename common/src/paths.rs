@@ -56,6 +56,35 @@ pub fn jsx_indices() -> Option<PathBuf> {
     Some(local)
 }
 
+/// Returns the path to the styles directory
+/// This path will contain the styles that vite needs to compile
+/// for all the windows specified in the configuration.
+/// If the directory does not exist, it will be created.
+///
+/// `~/.config/skadi/styles`
+pub fn styles() -> Option<PathBuf> {
+    let mut config = config()?;
+    config.push("styles");
+
+    fs::create_dir_all(&config).ok()?;
+
+    Some(config)
+}
+
+/// Returns the path to the dist directory
+/// This path will contain the built files after running `vite build`.
+/// If the directory does not exist, it will be created.
+///
+/// `~/.local/share/skadi/dist`
+pub fn dist() -> Option<PathBuf> {
+    let mut local = local()?;
+    local.push("dist");
+
+    fs::create_dir_all(&local).ok()?;
+
+    Some(local)
+}
+
 /// Returns the path to the plugins directory
 /// This path will contain the plugins that vite needs to compile
 /// for all the windows specified in the configuration.

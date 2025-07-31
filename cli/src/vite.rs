@@ -93,8 +93,24 @@ impl ViteWorkspace {
     }
 
     async fn generate_jsx_indices(&self, config: &Config) -> Result<()> {
+        let styles = paths::styles().ok_or_else(|| anyhow!("Failed to find styles directory"))?;
+        let mut rd = fs::read_dir(&styles).await?;
+        let mut styles = Vec::new();
+
+        while let Some(e) = rd.next_entry().await.transpose() {
+            let Ok(entry) = e else {
+                continue;
+            };
+
+            if let Some(ext) = entry.path().extension() {
+                if ext == "css" {
+                    styles.push(entry.path().display().to_string());
+                }
+            }
+        }
+
         for wc in &config.windows {
-            let content = Templates::jsx_index(&wc.label);
+            let content = Templates::jsx_index(&wc.label, &styles);
             let path = self.root.join("jsx").join(format!("{}.jsx", wc.label));
 
             fs::write(path, content).await?;

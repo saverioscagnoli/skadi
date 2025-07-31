@@ -25,6 +25,7 @@ function resolveHtmlEntryPoints() {
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: "./",
   plugins: [react(), tailwindcss()],
   publicDir: `${homedir()}/.config/skadi/assets`,
   build: {

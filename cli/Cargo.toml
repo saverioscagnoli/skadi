@@ -3,6 +3,10 @@ name = "cli"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "skadi"
+path = "src/main.rs"
+
 [dependencies]
 common = { path = "../common" }
 clap = { version = "4.5.41", features = ["derive"] }
@@ -11,3 +15,5 @@ phf = { version = "0.12.1", features = ["macros"] }
 which = "8.0.0"
 anyhow = "1.0.98"
 chrono = "0.4.41"
+gtk = { path = "../gtk" }
+indicatif = "0.18.0"
