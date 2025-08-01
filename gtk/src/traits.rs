@@ -9,14 +9,33 @@ use gtk4::{
         prelude::{DisplayExt, MonitorExt},
     },
     gio::prelude::ListModelExtManual,
+    glib::{self},
     prelude::{GtkWindowExt, WidgetExt},
 };
 use gtk4_layer_shell::LayerShell;
+use serde::Deserialize;
+use serde_json::json;
+use std::{
+    io::{BufRead, BufReader},
+    process::{Child, Command, Stdio},
+    sync::mpsc,
+    thread,
+};
 use traccia::error;
+use webkit6::prelude::WebViewExt;
 
 #[cfg(debug_assertions)]
 use traccia::debug;
-use webkit6::prelude::WebViewExt;
+
+#[derive(Debug, Deserialize)]
+struct Message {
+    id: String,
+    action: String,
+    script: String,
+    polls: Option<bool>,
+    is_executable: Option<bool>,
+    args: Option<Vec<String>>,
+}
 
 pub trait GtkSetup {
     fn create_app(&self) -> gtk4::Application;
@@ -26,7 +45,7 @@ pub trait GtkSetup {
 impl GtkSetup for Config {
     fn create_app(&self) -> gtk4::Application {
         gtk4::Application::builder()
-            .application_id(&self.app_id)
+            .application_id("com.skadi.app")
             .build()
     }
 
@@ -47,37 +66,41 @@ impl GtkSetup for Config {
 
         let web_context = webkit6::WebContext::new();
 
-        for wc in &self.windows {
-            let window = gtk4::ApplicationWindow::builder()
-                .application(app)
-                .title(&wc.label)
-                .build();
-
-            let webview = webkit6::WebView::builder()
-                .web_context(&web_context)
-                .build();
-
-            let context = webview.web_context().unwrap();
-
-            // Clone data needed inside the closure
-            let dist_cloned = dist.clone();
-            let label_cloned = wc.label.clone();
-
-            context.register_uri_scheme("app", move |request| {
+        // Register the URI scheme handler ONCE, outside the window loop
+        web_context.register_uri_scheme("app", {
+            let dist_clone = dist.clone();
+            move |request| {
                 let uri = request.uri();
                 let binding = uri.unwrap();
-                let path = binding
-                    .strip_prefix("app://localhost")
+                let full_path = binding
+                    .strip_prefix("app://localhost/")
                     .unwrap_or("")
                     .trim_start_matches('/');
 
-                let file_path = if path.is_empty() {
-                    // Serve the main HTML file
-                    dist_cloned.join(format!("html/{}.html", label_cloned))
+                let file_path = if full_path.contains('/') {
+                    // This is an asset request like "topbar/styles.css"
+                    let parts: Vec<&str> = full_path.splitn(2, '/').collect();
+                    let asset_path = parts[1];
+                    // Assets are in the dist/assets/ directory
+                    dist_clone.join(format!("assets/{}", asset_path))
+                } else if full_path.ends_with(".css")
+                    || full_path.ends_with(".js")
+                    || full_path.ends_with(".png")
+                    || full_path.ends_with(".jpg")
+                {
+                    // Direct asset request like "styles.css"
+                    dist_clone.join(format!("assets/{}", full_path))
+                } else if !full_path.is_empty() {
+                    // HTML request like "topbar" or
+                    // HTML files are in dist/html/ and have .html extension
+                    dist_clone.join(format!("html/{}.html", full_path))
                 } else {
-                    // Serve other assets (CSS, JS, etc.)
-                    dist_cloned.join(path)
+                    // Fallback
+                    dist_clone.join("html/index.html")
                 };
+
+                #[cfg(debug_assertions)]
+                debug!("Serving file: {:?}", file_path);
 
                 match std::fs::read(&file_path) {
                     Ok(data) => {
@@ -98,17 +121,27 @@ impl GtkSetup for Config {
                         request.finish_error(&mut error);
                     }
                 }
-            });
+            }
+        });
+
+        for wc in &self.windows {
+            let window = gtk4::ApplicationWindow::builder()
+                .application(app)
+                .title(&wc.label)
+                .build();
+
+            let webview = webkit6::WebView::builder()
+                .web_context(&web_context)
+                .build();
 
             #[cfg(debug_assertions)]
             {
                 if let Some(settings) = webkit6::prelude::WebViewExt::settings(&webview) {
                     settings.set_enable_developer_extras(true);
-                    //   settings.set_disable_web_security(true);
                 }
             }
 
-            webview.load_uri("app://localhost");
+            webview.load_uri(&format!("app://localhost/{}", wc.label));
             webview.set_background_color(&RGBA::TRANSPARENT);
 
             window.set_child(Some(&webview));
@@ -179,15 +212,163 @@ impl GtkSetup for Config {
             window.set_resizable(false);
             window.set_decorated(false);
 
-            let user_content_manager = webview
+            let ucm = webview
                 .user_content_manager()
                 .expect("WebView should have a UserContentManager");
 
-            user_content_manager.register_script_message_handler("exec", None);
+            ucm.register_script_message_handler("exec", None);
+
+            ucm.connect_script_message_received(
+                Some("exec"),
+                glib_macros::clone!(
+                    #[weak]
+                    webview,
+                    move |_, message| {
+                        let message: Message = match serde_json::from_str(&message.to_string()) {
+                            Ok(m) => m,
+                            Err(e) => {
+                                eprintln!("Failed to parse message: {}", e);
+                                return;
+                            }
+                        };
+
+                        handle_frontend_message(&message, &webview);
+                    }
+                ),
+            );
 
             windows.push(window);
         }
 
         Ok(windows)
+    }
+}
+
+fn spawn_process(message: &Message) -> Result<Child, std::io::Error> {
+    let script = message.script.clone();
+    if message.is_executable.unwrap_or(false) {
+        Command::new(script)
+            .args(message.args.clone().unwrap_or_default())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+    } else {
+        Command::new("sh")
+            .arg("-c")
+            .arg(script)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+    }
+}
+
+fn handle_frontend_message(message: &Message, webview: &webkit6::WebView) {
+    if message.action != "exec" {
+        eprintln!(
+            "How did you even get here? Action '{}' is not supported",
+            message.action
+        );
+        return;
+    }
+
+    let mut child = match spawn_process(message) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to execute script: {}", e);
+            return;
+        }
+    };
+
+    if message.polls.unwrap_or(false) {
+        // Handle polling command - spawn thread to read continuous output
+        let script_name = message.script.clone();
+
+        // Create a channel to send data back to main thread
+        let (tx, rx) = mpsc::channel::<String>();
+
+        // Take stdout from child before moving into thread
+        if let Some(stdout) = child.stdout.take() {
+            thread::spawn(move || {
+                let reader = BufReader::new(stdout);
+                for line in reader.lines() {
+                    match line {
+                        Ok(line_content) => {
+                            if tx.send(line_content).is_err() {
+                                // Receiver has been dropped, stop sending
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Error reading from polling command: {}", e);
+                            break;
+                        }
+                    }
+                }
+            });
+        }
+
+        // Clone webview for the polling loop
+        let webview_clone = webview.clone();
+
+        // Set up a recurring idle callback to check for messages
+        glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+            match rx.try_recv() {
+                Ok(line_content) => {
+                    let js_code = format!(
+                        "window.dispatchEvent(new CustomEvent('{}', {{ detail: {} }}));",
+                        script_name,
+                        serde_json::to_string(&line_content).unwrap_or_else(|_| "null".to_string())
+                    );
+                    webview_clone.evaluate_javascript(
+                        &js_code,
+                        None,
+                        None,
+                        None::<&gtk4::gio::Cancellable>,
+                        |_| {},
+                    );
+                    glib::ControlFlow::Continue
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    // No message available, continue checking
+                    glib::ControlFlow::Continue
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    // Sender has been dropped, stop the timeout
+                    glib::ControlFlow::Break
+                }
+            }
+        });
+    } else {
+        // Handle one-shot command as before
+        let output = match child.wait_with_output() {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("Failed to read output: {}", e);
+                return;
+            }
+        };
+
+        let response = match serde_json::to_string(&String::from_utf8_lossy(&output.stdout)) {
+            Ok(res) => res,
+            Err(e) => {
+                eprintln!("Failed to serialize output: {}", e);
+                return;
+            }
+        };
+
+        let response = json!({
+            "success": output.status.success(),
+            "data": response,
+        });
+
+        // Send response back to frontend
+        let js_code = format!("window.callbackHandler('{}', {});", message.id, response);
+        webview.evaluate_javascript(
+            &js_code,
+            None,
+            None,
+            None::<&gtk4::gio::Cancellable>,
+            |_| {},
+        );
     }
 }

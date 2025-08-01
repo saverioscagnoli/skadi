@@ -1,11 +1,8 @@
 use crate::{
-    registry::PluginRegistry, spawn_process_quiet, spinner::SpinnerHandle, templates::Templates,
+    spawn_process_output, spawn_process_quiet, spinner::SpinnerHandle, templates::Templates,
 };
 use anyhow::{Result, anyhow};
-use common::{
-    config::{Config, Framework},
-    paths,
-};
+use common::{config::Config, paths};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
@@ -34,24 +31,6 @@ impl ViteWorkspace {
         self.generate_html_indices(config).await?;
         self.generate_jsx_indices(config).await?;
 
-        spinner.update_message("Registering plugins...");
-
-        let Some(plugin_directory) = paths::plugins() else {
-            return Err(anyhow!(
-                "Plugin directory not found. Please ensure plugins are set up correctly."
-            ));
-        };
-
-        let mut registry = PluginRegistry::new(&plugin_directory);
-
-        if let Err(e) = registry.init().await {
-            return Err(anyhow!("Failed to initialize plugin registry: {}", e));
-        }
-
-        spinner.update_message("Writing plugin registry...");
-        let path = self.root.join("registry.js");
-        registry.write(&path, Framework::React).await?;
-
         spinner.update_message("Running prettier...");
 
         if let Err(_) = spawn_process_quiet("npm", &["run", "format"], Some(&self.root)).await {
@@ -67,12 +46,33 @@ impl ViteWorkspace {
     }
 
     async fn check_directories(&self) -> Result<()> {
-        fs::create_dir_all(self.root.join("html")).await?;
-        fs::create_dir_all(self.root.join("jsx")).await?;
+        let html = self.root.join("html");
+        let jsx = self.root.join("jsx");
+
+        fs::create_dir_all(&html).await?;
+        fs::create_dir_all(&jsx).await?;
+
+        self.clean_directory(&html).await?;
+        self.clean_directory(&jsx).await?;
 
         Ok(())
     }
 
+    async fn clean_directory<P: AsRef<Path>>(&self, dir: P) -> Result<()> {
+        let mut entries = fs::read_dir(dir).await?;
+
+        while let Some(entry) = entries.next_entry().await? {
+            let path: PathBuf = entry.path();
+
+            if path.is_dir() {
+                fs::remove_dir_all(&path).await?;
+            } else {
+                fs::remove_file(&path).await?;
+            }
+        }
+
+        Ok(())
+    }
     async fn npm_install(&self) -> Result<()> {
         let status = spawn_process_quiet("npm", &["install"], Some(&self.root)).await?;
 
@@ -112,7 +112,21 @@ impl ViteWorkspace {
         }
 
         for wc in &config.windows {
-            let content = Templates::jsx_index(&wc.label, &styles);
+            let paths = wc
+                .plugins
+                .iter()
+                .map(|p| {
+                    if p.is_absolute() {
+                        p.clone()
+                    } else {
+                        paths::config()
+                            .map(|base| base.join(p))
+                            .unwrap_or_else(|| p.clone())
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let content = Templates::jsx_index(&wc.label, &styles, &paths);
             let path = self.root.join("jsx").join(format!("{}.jsx", wc.label));
 
             fs::write(path, content).await?;
@@ -121,10 +135,13 @@ impl ViteWorkspace {
     }
 
     async fn vite_build(&self) -> Result<()> {
-        let status = spawn_process_quiet("npm", &["run", "build"], Some(&self.root)).await?;
+        let output = spawn_process_output("npm", &["run", "build"], Some(&self.root)).await?;
 
-        if !status.success() {
-            return Err(anyhow!("vite build failed with status: {}", status));
+        if !output.status.success() {
+            return Err(anyhow!(
+                "vite build failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
         }
 
         Ok(())

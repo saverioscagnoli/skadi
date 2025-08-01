@@ -213,21 +213,17 @@ pub struct WindowConfig {
     pub margin_left: Option<i32>,
     #[serde(default)]
     pub margin_right: Option<i32>,
+
+    #[serde(default)]
+    pub plugins: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    pub app_id: String,
-    #[serde(default = "Config::default_port")]
-    pub port: u16,
     pub windows: Vec<WindowConfig>,
 }
 
 impl Config {
-    pub fn default_port() -> u16 {
-        3499
-    }
-
     pub fn default_layer() -> Layer {
         Layer::Top
     }

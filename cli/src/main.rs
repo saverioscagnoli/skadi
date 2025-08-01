@@ -1,4 +1,3 @@
-mod registry;
 mod requirements;
 mod spinner;
 mod templates;

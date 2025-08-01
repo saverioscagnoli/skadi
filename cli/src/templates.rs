@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::Datelike;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 
 pub struct Templates {}
@@ -10,6 +10,7 @@ impl Templates {
         "package.json" => include_str!("../../templates/package.json"),
         "vite.config.js" => include_str!("../../templates/vite.config.js"),
         "index.css" => include_str!("../../templates/index.css"),
+        "utils.js" => include_str!("../../templates/utils.js"),
     };
 
     pub async fn write_all<P: AsRef<Path>>(dir: P) -> Result<()> {
@@ -44,32 +45,50 @@ impl Templates {
         )
     }
 
-    pub fn jsx_index<L: AsRef<str>>(label: L, styles: &Vec<String>) -> String {
+    pub fn jsx_index<L: AsRef<str>>(
+        label: L,
+        styles: &Vec<String>,
+        plugins_path: &Vec<PathBuf>,
+    ) -> String {
         let label = label.as_ref();
 
         format!(
             r#"
+            {}
+
             import {{ createRoot }} from "react-dom/client";
-            import plugins from "../registry.js";
-            // import {{ exec, useListen }} from "../util.js";
+            import React from "react";
+            import {{ exec, useListen }} from "../utils.js";
 
             import "../index.css";
 
+            // Styles
             {}
+
+            // Plugins
+            const plugins = [
+            {}
+            ];
 
             const LABEL = "{}"; 
 
             createRoot(document.getElementById("root")).render(
               <div className="w-screen h-screen {}-window">
                 {{plugins.map(Plugin => (
-                  <Plugin key={{Plugin.name}}  />
+                  <Plugin key={{Plugin.name}} exec={{exec}} useListen={{useListen}} />
                 ))}}
               </div>
             );
             "#,
+            Templates::mit_license(),
             styles
                 .iter()
                 .map(|p| format!("import \"{}\";", p))
+                .collect::<Vec<_>>()
+                .join(",\n"),
+            plugins_path
+                .iter()
+                .map(|p| format!("React.lazy(() => import (\"{}\")),", p.display()))
                 .collect::<Vec<_>>()
                 .join("\n"),
             label,
