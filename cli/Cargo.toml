@@ -11,3 +11,4 @@ clap = { version = "4.5.42", features = ["derive"] }
 tokio = { version = "1.47.1", features = ["full"] }
 which = "8.0.0"
 common = { path = "../common" }
+phf = { version = "0.12.1", features = ["macros"] }

@@ -1,8 +1,8 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::{
     fs,
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, BufReader},
     process::Command,
 };
 
@@ -20,7 +20,7 @@ pub enum OutputMode {
 
 #[derive(Debug, Clone)]
 pub struct SpawnOptions {
-    pub cwd: Option<String>,
+    pub cwd: Option<PathBuf>,
     pub stdout: OutputMode,
     pub stderr: OutputMode,
 }
@@ -45,14 +45,6 @@ pub struct SpawnResult {
 pub struct Io;
 
 impl Io {
-    /// Clears the current line in the terminal
-    pub async fn clear_line() {
-        print!("\x1B[2K\r");
-        if let Err(e) = tokio::io::stdout().flush().await {
-            eprintln!("Failed to clear line: {}", e);
-        }
-    }
-
     pub async fn clean<P: AsRef<Path>>(path: P) -> tokio::io::Result<()> {
         if fs::metadata(&path).await.is_ok() {
             fs::remove_dir_all(&path).await?;
@@ -177,6 +169,7 @@ impl Io {
     pub async fn spawn_silent<C: AsRef<str>>(
         command: C,
         args: &[&str],
+        cwd: Option<&PathBuf>,
     ) -> tokio::io::Result<SpawnResult> {
         Self::spawn(
             command,
@@ -184,7 +177,7 @@ impl Io {
             SpawnOptions {
                 stdout: OutputMode::Ignore,
                 stderr: OutputMode::Ignore,
-                ..Default::default()
+                cwd: cwd.map(|p| p.clone()),
             },
         )
         .await
@@ -193,6 +186,7 @@ impl Io {
     pub async fn spawn_with_output<C: AsRef<str>>(
         command: C,
         args: &[&str],
+        cwd: Option<&PathBuf>,
     ) -> tokio::io::Result<SpawnResult> {
         Self::spawn(
             command,
@@ -200,7 +194,7 @@ impl Io {
             SpawnOptions {
                 stdout: OutputMode::Pipe,
                 stderr: OutputMode::Pipe,
-                ..Default::default()
+                cwd: cwd.map(|p| p.clone()),
             },
         )
         .await
@@ -209,6 +203,7 @@ impl Io {
     pub async fn spawn_and_capture<C: AsRef<str>>(
         command: C,
         args: &[&str],
+        cwd: Option<&PathBuf>,
     ) -> tokio::io::Result<SpawnResult> {
         Self::spawn(
             command,
@@ -216,7 +211,7 @@ impl Io {
             SpawnOptions {
                 stdout: OutputMode::Capture,
                 stderr: OutputMode::Capture,
-                ..Default::default()
+                cwd: cwd.map(|p| p.clone()),
             },
         )
         .await

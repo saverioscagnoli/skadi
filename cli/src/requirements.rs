@@ -1,4 +1,5 @@
 use common::io::{Io, SpawnResult};
+use phf::{Map, phf_map};
 use tokio::{fs, io};
 use traccia::{debug, info, warn};
 use which::which;
@@ -20,7 +21,7 @@ impl Distro {
     /// This is a more reliable way to detect the distribution
     /// but it requires lsb_release to be installed
     async fn detect_fallback() -> Self {
-        let Ok(r) = Io::spawn_and_capture("lsb_release", &["-is"]).await else {
+        let Ok(r) = Io::spawn_and_capture("lsb_release", &["-is"], None).await else {
             return Distro::Unknown;
         };
 
@@ -94,7 +95,13 @@ pub struct Requirements {
 }
 
 impl Requirements {
-    const REQUIRED_BINARIES: [&'static str; 2] = ["node", "npm"];
+    /// List of required binaries that must be present in the system
+    /// This is a static map that contains the binary name as the key
+    /// and the package name as the value
+    const REQUIRED_BINARIES: Map<&'static str, &'static str> = phf_map! {
+        "node" => "nodejs",
+        "npm" => "npm",
+    };
 
     pub async fn new() -> Self {
         let distro = Distro::detect().await;
@@ -108,7 +115,7 @@ impl Requirements {
     pub async fn install_package<T: AsRef<str>>(&self, package: T) -> io::Result<SpawnResult> {
         let command = self.distro.install_command(package);
 
-        Io::spawn_and_capture("sh", &["-c", &command]).await
+        Io::spawn_and_capture("sh", &["-c", &command], None).await
     }
 
     pub async fn check_all(&self) -> io::Result<()> {
@@ -117,22 +124,24 @@ impl Requirements {
         debug!("Detected distribution: {:?}", self.distro);
         info!(
             "Checking requirements: {}",
-            Requirements::REQUIRED_BINARIES.join(", ")
+            Requirements::REQUIRED_BINARIES
+                .keys()
+                .map(|k| *k)
+                .collect::<Vec<_>>()
+                .join(", ")
         );
 
-        for bin in Requirements::REQUIRED_BINARIES.iter() {
+        for bin in Requirements::REQUIRED_BINARIES.keys() {
             if !self.check(bin) {
-                to_install.push(bin.to_string());
+                to_install.push(Requirements::REQUIRED_BINARIES[bin]);
             }
         }
 
         if to_install.is_empty() {
-            Io::clear_line().await;
             info!("All requirements are met.");
             return Ok(());
         }
 
-        Io::clear_line().await;
         warn!(
             "Missing required binaries: {}. Installing...",
             to_install.join(", ")
@@ -150,8 +159,10 @@ impl Requirements {
             }
         }
 
-        Io::clear_line().await;
-        info!("Successfully installed required packages: {}", packages);
+        info!(
+            "Successfully installed required packages: {}",
+            to_install.join(", ")
+        );
 
         Ok(())
     }
