@@ -1,4 +1,4 @@
-use crate::templates::Templates;
+use crate::{Args, templates::Templates};
 use common::{config::Config, dev_mode, io::Io};
 use std::path::{Path, PathBuf};
 use tokio::{fs, io};
@@ -21,7 +21,7 @@ impl ViteWorkspace {
         Self { root, jsx, html }
     }
 
-    pub async fn init(&self, config: &Config, show_output: bool) -> io::Result<()> {
+    pub async fn init(&self, config: &Config, args: &Args) -> io::Result<()> {
         info!("Initializing vite workspace...");
 
         self.clean().await?;
@@ -39,6 +39,7 @@ impl ViteWorkspace {
         if dev_mode() {
             info!("Running vite dev server...");
             let root = self.root.clone();
+            let show_output = args.show_output;
 
             tokio::spawn(async move {
                 if show_output {
@@ -58,7 +59,7 @@ impl ViteWorkspace {
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         } else {
             info!("Building for production...");
-            if show_output {
+            if args.show_output {
                 Io::spawn_with_output("npm", &["run", "build"], Some(&self.root)).await?;
             } else {
                 Io::spawn_and_capture("npm", &["run", "build"], Some(&self.root)).await?;

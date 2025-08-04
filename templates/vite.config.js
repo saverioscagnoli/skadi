@@ -17,26 +17,18 @@ const LOCAL_PATH = `${homedir()}/.local/share/skadi/html`;
  * @returns {string[]} - Array of HTML entry points based on the window labels in the config.
  */
 function resolveHtmlEntryPoints() {
-    let rd = fs.readdirSync(LOCAL_PATH)
-    return rd.map(f => `html/${f}`);
+  let rd = fs.readdirSync(LOCAL_PATH);
+  return rd.map((f) => `html/${f}`);
 }
-
-
 
 // https://vite.dev/config/
 export default defineConfig({
   base: "./",
-  plugins: [
-    react(), 
-         tailwindcss(),
-
-  ],
-  css:{
+  plugins: [react(), tailwindcss()],
+  css: {
     postcss: {
-      plugins: [
-        postcss
-      ]
-    }
+      plugins: [postcss],
+    },
   },
   publicDir: `${homedir()}/.config/skadi/assets`,
   build: {
@@ -48,6 +40,5 @@ export default defineConfig({
     fs: {
       allow: [`${homedir()}/.config/skadi`, `${homedir()}/.local/share/skadi`],
     },
- 
   },
 });

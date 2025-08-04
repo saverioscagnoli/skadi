@@ -48,13 +48,17 @@ fn workspace_path() -> PathBuf {
 
 #[derive(Debug, Parser)]
 struct Args {
-    /// Skip checking for requirements
-    /// This will skip checking for node.js and npm
+    /// Skip checking for requirements.
     #[arg(long, action = ArgAction::SetTrue, default_value_t = false)]
     skip_requirements: bool,
 
-    /// Enable development mode
-    /// This will enable features like hot reloading and other development tools
+    /// Skip building the Vite project.
+    /// This will skip npm install and such
+    #[arg(long, action = ArgAction::SetTrue, default_value_t = false, conflicts_with = "development")]
+    skip_vite: bool,
+
+    /// Enable development mode.
+    /// This will run the Vite dev server instead of building for production
     #[arg(long = "dev", action = ArgAction::SetTrue, default_value_t = false)]
     development: bool,
 
@@ -62,9 +66,9 @@ struct Args {
     #[arg(long, action = ArgAction::SetTrue, default_value_t = false)]
     debug: bool,
 
-    /// Path to the workspace directory
+    /// Path to the workspace directory.
     /// This is where the frontend files will live and where the vite server will run
-    #[arg(long, default_value_t = workspace_path().to_string_lossy().to_string())]
+    #[arg(long, default_value_t = workspace_path().to_string_lossy().to_string(), conflicts_with = "skip_vite")]
     workspace_dir: String,
 
     /// Shows the output of vite commands in the terminal
@@ -109,11 +113,16 @@ async fn main() {
     info!("Using configuration {}", config.path().display());
 
     let workspace_path = PathBuf::from(&args.workspace_dir);
-    let vite = ViteWorkspace::new(&workspace_path);
 
-    if let Err(e) = vite.init(&config, args.show_output).await {
-        fatal!("Failed to initialize Vite workspace: {}", e);
-        return;
+    if args.skip_vite {
+        warn!("Skipping vite initialization. Ensure that the project was built previously.");
+    } else {
+        let vite = ViteWorkspace::new(&workspace_path);
+
+        if let Err(e) = vite.init(&config, &args).await {
+            fatal!("Failed to initialize Vite workspace: {}", e);
+            return;
+        }
     }
 
     gtk::run(&config, &workspace_path);
