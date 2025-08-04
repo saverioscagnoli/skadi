@@ -3,17 +3,11 @@ name = "cli"
 version = "0.1.0"
 edition = "2024"
 
-[[bin]]
-name = "skadi"
-path = "src/main.rs"
-
 [dependencies]
-common = { path = "../common" }
-clap = { version = "4.5.41", features = ["derive"] }
-tokio = { version = "1.47.0", features = ["full"] }
-phf = { version = "0.12.1", features = ["macros"] }
-which = "8.0.0"
-anyhow = "1.0.98"
 chrono = "0.4.41"
+traccia = "2.2.5"
 gtk = { path = "../gtk" }
-nix = { version = "0.30.1", features = ["user"] }
+clap = { version = "4.5.42", features = ["derive"] }
+tokio = { version = "1.47.1", features = ["full"] }
+which = "8.0.0"
+common = { path = "../common" }

@@ -1,9 +1,11 @@
-use crate::{spawn_process_output, spawn_process_quiet};
-use anyhow::Result;
-use nix::unistd::Uid;
-use tokio::fs;
+use common::io::{Io, SpawnResult};
+use tokio::{fs, io};
+use traccia::{debug, info, warn};
 use which::which;
 
+/// Simple enum to represent different Linux distributions
+/// This is used to determine the package manager and installation commands
+/// during the requirements check
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Distro {
     Arch,
@@ -14,14 +16,19 @@ pub enum Distro {
 }
 
 impl Distro {
+    /// If /etc/os-release is not available, we fallback to using lsb_release
+    /// This is a more reliable way to detect the distribution
+    /// but it requires lsb_release to be installed
     async fn detect_fallback() -> Self {
-        let Ok(output) = spawn_process_output("lsb_release", &["-is"], None).await else {
+        let Ok(r) = Io::spawn_and_capture("lsb_release", &["-is"]).await else {
             return Distro::Unknown;
         };
 
-        let distro = String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .to_lowercase();
+        let Some(outptut) = r.stdout else {
+            return Distro::Unknown;
+        };
+
+        let distro = outptut.trim().to_lowercase();
 
         match distro.as_str() {
             "arch" => Distro::Arch,
@@ -32,6 +39,11 @@ impl Distro {
         }
     }
 
+    /// Detect the Linux distribution by reading /etc/os-release
+    /// This is the preferred method as it is more reliable and does not require
+    /// additional tools like lsb_release
+    ///
+    /// Fallbacks to using lsb_release if /etc/os-release is not available
     pub async fn detect() -> Self {
         let Ok(os_release) = fs::read_to_string("/etc/os-release").await else {
             return Self::detect_fallback().await;
@@ -57,6 +69,8 @@ impl Distro {
         }
     }
 
+    /// Returns the string that would be used to install a package
+    /// on the current distribution
     pub fn install_command<T: AsRef<str>>(&self, package: T) -> String {
         match self {
             Distro::Arch => format!("sudo pacman -S --noconfirm {}", package.as_ref()),
@@ -71,15 +85,17 @@ impl Distro {
     }
 }
 
-unsafe impl Send for Requirements {}
-unsafe impl Sync for Requirements {}
-
+/// Requirements struct to hold the detected distribution
+/// and provide methods to check for required binaries and install packages
+/// without checking every time
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Requirements {
     pub distro: Distro,
 }
 
 impl Requirements {
+    const REQUIRED_BINARIES: [&'static str; 2] = ["node", "npm"];
+
     pub async fn new() -> Self {
         let distro = Distro::detect().await;
         Requirements { distro }
@@ -89,18 +105,54 @@ impl Requirements {
         which(bin.as_ref()).is_ok()
     }
 
-    pub fn check_root(&self) -> bool {
-        Uid::effective().is_root()
-    }
-
-    pub async fn install_package<T: AsRef<str>>(&self, package: T) -> Result<()> {
+    pub async fn install_package<T: AsRef<str>>(&self, package: T) -> io::Result<SpawnResult> {
         let command = self.distro.install_command(package);
 
-        spawn_process_quiet("sh", &["-c", &command], None).await?;
+        Io::spawn_and_capture("sh", &["-c", &command]).await
+    }
+
+    pub async fn check_all(&self) -> io::Result<()> {
+        let mut to_install = Vec::new();
+
+        debug!("Detected distribution: {:?}", self.distro);
+        info!(
+            "Checking requirements: {}",
+            Requirements::REQUIRED_BINARIES.join(", ")
+        );
+
+        for bin in Requirements::REQUIRED_BINARIES.iter() {
+            if !self.check(bin) {
+                to_install.push(bin.to_string());
+            }
+        }
+
+        if to_install.is_empty() {
+            Io::clear_line().await;
+            info!("All requirements are met.");
+            return Ok(());
+        }
+
+        Io::clear_line().await;
+        warn!(
+            "Missing required binaries: {}. Installing...",
+            to_install.join(", ")
+        );
+
+        let packages = to_install.join(" ");
+        let output = self.install_package(&packages).await?;
+
+        if let Some(stderr) = output.stderr {
+            if !stderr.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Failed to install packages: {}", stderr),
+                ));
+            }
+        }
+
+        Io::clear_line().await;
+        info!("Successfully installed required packages: {}", packages);
 
         Ok(())
     }
 }
-
-unsafe impl Send for Distro {}
-unsafe impl Sync for Distro {}
