@@ -1,11 +1,8 @@
-use std::path::{Path, PathBuf};
-
 use chrono::Datelike;
 use phf::{Map, phf_map};
+use std::path::{Path, PathBuf};
 use tokio::{fs, io};
 use traccia::debug;
-
-use crate::debug_mode;
 
 pub struct Templates;
 
@@ -26,9 +23,7 @@ impl Templates {
 
             fs::write(&path, content).await?;
 
-            if debug_mode() {
-                debug!("Wrote template file: {}", path.display());
-            }
+            debug!("Wrote template file: {}", path.display());
         }
 
         Ok(())
@@ -77,8 +72,6 @@ impl Templates {
             {}
 
             // Plugins
-            {}
-
             const plugins = [
             {}
             ];
@@ -101,14 +94,7 @@ impl Templates {
                 .join(",\n"),
             plugins
                 .iter()
-                .enumerate()
-                .map(|(i, p)| format!("import Plugin{} from '{}'", i + 1, p.display()))
-                .collect::<Vec<_>>()
-                .join("\n"),
-            styles
-                .iter()
-                .enumerate()
-                .map(|(i, _)| format!("Plugin{}", i + 1))
+                .map(|p| format!("React.lazy(() => import(\"{}\"))", p.display()))
                 .collect::<Vec<_>>()
                 .join(",\n"),
             label,

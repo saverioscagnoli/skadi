@@ -2,11 +2,10 @@ mod requirements;
 mod templates;
 mod vite;
 
-use std::{path::PathBuf, sync::OnceLock};
-
 use crate::{requirements::Requirements, vite::ViteWorkspace};
 use clap::{ArgAction, Parser};
-use common::config::Config;
+use common::{config::Config, debug_mode, set_debug_mode, set_dev_mode};
+use std::path::PathBuf;
 use traccia::{Color, Colorize, LogLevel, Style, error, fatal, info, warn};
 
 struct CustomFormatter;
@@ -29,40 +28,29 @@ impl traccia::Formatter for CustomFormatter {
     }
 }
 
-fn log_level(debug: bool) -> LogLevel {
-    if cfg!(debug_assertions) || debug {
+fn log_level() -> LogLevel {
+    if debug_mode() {
         LogLevel::Debug
     } else {
         LogLevel::Info
     }
 }
 
-static DEBUG: OnceLock<bool> = OnceLock::new();
-static DEV: OnceLock<bool> = OnceLock::new();
-
-pub fn debug_mode() -> bool {
-    cfg!(debug_assertions) || DEBUG.get().copied().unwrap_or(false)
-}
-
-pub fn dev() -> bool {
-    DEV.get().copied().unwrap_or(false)
-}
-
-fn workspace_path() -> Option<PathBuf> {
-    let home = std::env::var("HOME").ok()?;
+fn workspace_path() -> PathBuf {
+    let home = std::env::var("HOME").expect("How do you not have a HOME?");
     let path = PathBuf::from(home)
         .join(".local")
         .join("share")
         .join("skadi");
 
-    Some(path)
+    return path;
 }
 
 #[derive(Debug, Parser)]
 struct Args {
     /// Skip checking for requirements
     /// This will skip checking for node.js and npm
-    #[arg(long, action = ArgAction::Set, default_value_t = false)]
+    #[arg(long, action = ArgAction::SetTrue, default_value_t = false)]
     skip_requirements: bool,
 
     /// Enable development mode
@@ -76,8 +64,8 @@ struct Args {
 
     /// Path to the workspace directory
     /// This is where the frontend files will live and where the vite server will run
-    #[arg(long)]
-    workspace_dir: Option<String>,
+    #[arg(long, default_value_t = workspace_path().to_string_lossy().to_string())]
+    workspace_dir: String,
 
     /// Shows the output of vite commands in the terminal
     #[arg(long, action = ArgAction::SetTrue, default_value_t = false)]
@@ -88,16 +76,11 @@ struct Args {
 async fn main() {
     let args = Args::parse();
 
-    if DEBUG.set(args.debug).is_err() {
-        eprintln!("Debug flag was already set, ignoring subsequent attempts.");
-    }
-
-    if DEV.set(args.development).is_err() {
-        eprintln!("Development flag was already set, ignoring subsequent attempts.");
-    }
+    set_debug_mode(args.debug);
+    set_dev_mode(args.development);
 
     traccia::init_with_config(traccia::Config {
-        level: log_level(args.debug),
+        level: log_level(),
         format: Some(Box::new(CustomFormatter)),
         ..Default::default()
     });
@@ -125,22 +108,13 @@ async fn main() {
 
     info!("Using configuration {}", config.path().display());
 
-    let Some(root) = args
-        .workspace_dir
-        .as_deref()
-        .map(PathBuf::from)
-        .or_else(workspace_path)
-    else {
-        fatal!("No workspace directory specified and no default found. Exiting.");
-        return;
-    };
+    let workspace_path = PathBuf::from(&args.workspace_dir);
+    let vite = ViteWorkspace::new(&workspace_path);
 
-    let vite = ViteWorkspace::new(root);
-
-    if let Err(e) = vite.init(&args, &config).await {
+    if let Err(e) = vite.init(&config, args.show_output).await {
         fatal!("Failed to initialize Vite workspace: {}", e);
         return;
     }
 
-    gtk::run();
+    gtk::run(&config, &workspace_path);
 }

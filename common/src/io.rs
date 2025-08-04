@@ -216,4 +216,46 @@ impl Io {
         )
         .await
     }
+
+    pub async fn spawn_child<C: AsRef<str>>(
+        command: C,
+        args: &[&str],
+        options: SpawnOptions,
+    ) -> tokio::io::Result<tokio::process::Child> {
+        let mut cmd = Command::new(command.as_ref());
+
+        if let Some(cwd) = options.cwd {
+            cmd.current_dir(cwd);
+        }
+
+        cmd.args(args);
+
+        // Configure stdout
+        match options.stdout {
+            OutputMode::Ignore => {
+                cmd.stdout(Stdio::null());
+            }
+            OutputMode::Pipe | OutputMode::Capture => {
+                cmd.stdout(Stdio::piped());
+            }
+            OutputMode::Inherit => {
+                cmd.stdout(Stdio::inherit());
+            }
+        }
+
+        // Configure stderr
+        match options.stderr {
+            OutputMode::Ignore => {
+                cmd.stderr(Stdio::null());
+            }
+            OutputMode::Pipe | OutputMode::Capture => {
+                cmd.stderr(Stdio::piped());
+            }
+            OutputMode::Inherit => {
+                cmd.stderr(Stdio::inherit());
+            }
+        }
+
+        cmd.spawn()
+    }
 }

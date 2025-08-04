@@ -1,8 +1,8 @@
-use crate::{Args, debug_mode, templates::Templates};
-use common::{config::Config, io::Io};
+use crate::templates::Templates;
+use common::{config::Config, dev_mode, io::Io};
 use std::path::{Path, PathBuf};
 use tokio::{fs, io};
-use traccia::{debug, info};
+use traccia::{debug, error, info};
 
 pub struct ViteWorkspace {
     root: PathBuf,
@@ -21,7 +21,7 @@ impl ViteWorkspace {
         Self { root, jsx, html }
     }
 
-    pub async fn init(&self, args: &Args, config: &Config) -> io::Result<()> {
+    pub async fn init(&self, config: &Config, show_output: bool) -> io::Result<()> {
         info!("Initializing vite workspace...");
 
         self.clean().await?;
@@ -30,45 +30,51 @@ impl ViteWorkspace {
 
         self.generate_indices(config).await?;
 
-        if debug_mode() {
-            debug!("Running npm install...");
-        }
-
+        debug!("Running npm install...");
         Io::spawn_and_capture("npm", &["install"], Some(&self.root)).await?;
 
-        if debug_mode() {
-            debug!("Running prettier...");
-        }
-
+        debug!("Running prettier...");
         Io::spawn_and_capture("npm", &["run", "format"], Some(&self.root)).await?;
 
-        if debug_mode() {
-            debug!("Building vite...");
-        }
+        if dev_mode() {
+            info!("Running vite dev server...");
+            let root = self.root.clone();
 
-        if args.show_output {
-            Io::spawn_with_output("npm", &["run", "build"], Some(&self.root)).await?;
+            tokio::spawn(async move {
+                if show_output {
+                    if let Err(e) = Io::spawn_with_output("npm", &["run", "dev"], Some(&root)).await
+                    {
+                        error!("Failed to start vite dev server: {}", e);
+                    }
+                } else {
+                    if let Err(e) = Io::spawn_and_capture("npm", &["run", "dev"], Some(&root)).await
+                    {
+                        error!("Failed to start vite dev server: {}", e);
+                    }
+                }
+            });
+
+            // Wait a bit for the server to start
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         } else {
-            Io::spawn_and_capture("npm", &["run", "build"], Some(&self.root)).await?;
+            info!("Building for production...");
+            if show_output {
+                Io::spawn_with_output("npm", &["run", "build"], Some(&self.root)).await?;
+            } else {
+                Io::spawn_and_capture("npm", &["run", "build"], Some(&self.root)).await?;
+            }
         }
-
-        info!("Workspace initialized successfully.");
 
         Ok(())
     }
 
     async fn clean(&self) -> io::Result<()> {
         for path in [&self.root, &self.jsx, &self.html] {
-            if debug_mode() {
-                debug!("Cleaning {}...", path.display());
-            }
-
+            debug!("Cleaning {}...", path.display());
             Io::clean(path).await?;
         }
 
-        if debug_mode() {
-            debug!("Vite workspace cleaned.");
-        }
+        debug!("Vite workspace cleaned.");
 
         Ok(())
     }
@@ -83,16 +89,10 @@ impl ViteWorkspace {
             let styles = w.styles.iter().map(|s| config_dir.join(s)).collect();
             let plugins = w.plugins.iter().map(|p| config_dir.join(p)).collect();
 
-            if debug_mode() {
-                debug!("Creating {}...", jsx_path.display());
-            }
-
+            debug!("Creating {}...", jsx_path.display());
             fs::write(&jsx_path, Templates::jsx_index(&w.label, &styles, &plugins)).await?;
 
-            if debug_mode() {
-                debug!("Creating {}...", html_path.display());
-            }
-
+            debug!("Creating {}...", html_path.display());
             fs::write(&html_path, Templates::html_index(&w.label)).await?;
         }
 
