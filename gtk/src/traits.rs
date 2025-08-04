@@ -8,24 +8,22 @@ use gtk4::{
         Display, RGBA,
         prelude::{DisplayExt, MonitorExt},
     },
-    gio::prelude::ListModelExtManual,
-    glib::{self},
+    gio::prelude::{ListModelExt, ListModelExtManual},
+    glib::{self, object::Cast},
     prelude::{GtkWindowExt, WidgetExt},
 };
 use gtk4_layer_shell::LayerShell;
 use serde::Deserialize;
 use serde_json::json;
-use std::{
-    io::{BufRead, BufReader},
-    process::{Child, Command, Stdio},
-    sync::mpsc,
-    thread,
+use std::{collections::HashMap, process::Stdio};
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    process::{Child, Command},
+    sync::mpsc::{self, error::TryRecvError},
 };
+use traccia::debug;
 use traccia::error;
 use webkit6::prelude::WebViewExt;
-
-#[cfg(debug_assertions)]
-use traccia::debug;
 
 #[derive(Debug, Deserialize)]
 struct Message {
@@ -39,7 +37,11 @@ struct Message {
 
 pub trait GtkSetup {
     fn create_app(&self) -> gtk4::Application;
-    fn setup_windows(&self, app: &gtk4::Application) -> Result<Vec<gtk4::ApplicationWindow>>;
+    fn setup_windows(
+        &self,
+        app: &gtk4::Application,
+        debug: bool,
+    ) -> Result<Vec<gtk4::ApplicationWindow>>;
 }
 
 impl GtkSetup for Config {
@@ -49,7 +51,11 @@ impl GtkSetup for Config {
             .build()
     }
 
-    fn setup_windows(&self, app: &gtk4::Application) -> Result<Vec<gtk4::ApplicationWindow>> {
+    fn setup_windows(
+        &self,
+        app: &gtk4::Application,
+        debug: bool,
+    ) -> Result<Vec<gtk4::ApplicationWindow>> {
         let mut windows = Vec::new();
 
         let Some(display) = Display::default() else {
@@ -57,69 +63,107 @@ impl GtkSetup for Config {
         };
 
         let monitors = display.monitors();
+        let mut monitor_map = HashMap::new();
 
-        #[cfg(debug_assertions)]
-        debug!("Developer tools are enabled");
+        for m in monitors.iter::<gtk4::gdk::Monitor>().filter_map(Result::ok) {
+            if cfg!(debug_assertions) || debug {
+                let geometry = m.geometry();
+
+                debug!(
+                    "Monitor: {} - {}x{} @ ({}, {})",
+                    m.connector().unwrap_or("Unknown".into()),
+                    geometry.width(),
+                    geometry.height(),
+                    geometry.x(),
+                    geometry.y()
+                );
+            }
+
+            monitor_map.insert(m.connector().unwrap_or("unknown".into()).to_string(), m);
+        }
+
+        if cfg!(debug_assertions) || debug {
+            for i in 0..monitors.n_items() {
+                if let Some(monitor) = monitors.item(i) {
+                    let m = monitor
+                        .downcast_ref::<gtk4::gdk::Monitor>()
+                        .expect("Item should be a Monitor");
+                    let g = m.geometry();
+
+                    debug!(
+                        "Monitor: {} - {}x{} @ ({}, {})",
+                        m.connector().unwrap_or("Unknown".into()),
+                        g.width(),
+                        g.height(),
+                        g.x(),
+                        g.y()
+                    );
+                }
+            }
+        }
 
         let dist = paths::dist()
             .ok_or_else(|| anyhow!("Could not find or create distribution directory"))?;
 
         let web_context = webkit6::WebContext::new();
 
-        // Register the URI scheme handler ONCE, outside the window loop
-        web_context.register_uri_scheme("app", {
-            let dist_clone = dist.clone();
-            move |request| {
-                let uri = request.uri();
-                let binding = uri.unwrap();
-                let full_path = binding
-                    .strip_prefix("app://localhost/")
-                    .unwrap_or("")
-                    .trim_start_matches('/');
+        // Register URI schemes for serving files without creating a server
+        web_context.register_uri_scheme("app", move |request| {
+            let Some(uri) = request.uri() else {
+                error!("Failed to get URI from request");
+                return;
+            };
 
-                let file_path = if full_path.contains('/') {
-                    // This is an asset request like "topbar/styles.css"
-                    let parts: Vec<&str> = full_path.splitn(2, '/').collect();
-                    let asset_path = parts[1];
-                    // Assets are in the dist/assets/ directory
-                    dist_clone.join(format!("assets/{}", asset_path))
-                } else if full_path.ends_with(".css")
-                    || full_path.ends_with(".js")
-                    || full_path.ends_with(".png")
-                    || full_path.ends_with(".jpg")
-                {
-                    // Direct asset request like "styles.css"
-                    dist_clone.join(format!("assets/{}", full_path))
-                } else if !full_path.is_empty() {
-                    // HTML request like "topbar" or
-                    // HTML files are in dist/html/ and have .html extension
-                    dist_clone.join(format!("html/{}.html", full_path))
-                } else {
-                    // Fallback
-                    dist_clone.join("html/index.html")
-                };
+            let path = uri
+                .strip_prefix("app://localhost/")
+                .unwrap_or("")
+                .trim_start_matches('/');
 
-                #[cfg(debug_assertions)]
-                debug!("Serving file: {:?}", file_path);
+            let file_path;
 
-                match std::fs::read(&file_path) {
-                    Ok(data) => {
-                        let mime_type = mime_guess::from_path(&file_path)
-                            .first_or_octet_stream()
-                            .to_string();
-                        let stream = gtk4::gio::MemoryInputStream::from_bytes(
-                            &gtk4::glib::Bytes::from(&data),
-                        );
-                        request.finish(&stream, data.len() as i64, Some(&mime_type));
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to read file {:?}: {}", file_path, e);
-                        let mut error = gtk4::glib::Error::new(
-                            gtk4::gio::IOErrorEnum::NotFound,
-                            &format!("File not found: {:?}", file_path),
-                        );
-                        request.finish_error(&mut error);
-                    }
+            if path.contains('/') {
+                // Asset request like "topbar/styles.css"
+                let parts = path.splitn(2, '/').collect::<Vec<_>>();
+                let asset_path = parts.get(1).unwrap_or(&"");
+
+                file_path = dist.join(format!("assets/{}", asset_path));
+            } else if !path.is_empty() {
+                // HTML request like "topbar" or
+                // HTML files are in dist/html/ and have .html extension
+                file_path = dist.join(format!("html/{}.html", path));
+            } else {
+                // Fallback - asset file
+                file_path = dist.join(format!("assets/{}", path));
+            }
+
+            if cfg!(debug_assertions) || debug {
+                debug!(
+                    "Serving file: {:?}",
+                    file_path.file_name().unwrap_or_default()
+                );
+            }
+
+            match std::fs::read(&file_path) {
+                Ok(data) => {
+                    let mime_type = mime_guess::from_path(&file_path)
+                        .first_or_octet_stream()
+                        .to_string();
+
+                    let stream =
+                        gtk4::gio::MemoryInputStream::from_bytes(&gtk4::glib::Bytes::from(&data));
+
+                    request.finish(&stream, data.len() as i64, Some(&mime_type));
+                }
+
+                Err(e) => {
+                    eprintln!("Failed to read file {:?}: {}", file_path, e);
+
+                    let mut error = gtk4::glib::Error::new(
+                        gtk4::gio::IOErrorEnum::NotFound,
+                        &format!("File not found: {:?}", file_path),
+                    );
+
+                    request.finish_error(&mut error);
                 }
             }
         });
@@ -130,12 +174,19 @@ impl GtkSetup for Config {
                 .title(&wc.label)
                 .build();
 
+            // Use the same context for all webviews to save resources
             let webview = webkit6::WebView::builder()
                 .web_context(&web_context)
                 .build();
 
-            #[cfg(debug_assertions)]
-            {
+            // Disable the default context menu if not debugging
+            if !cfg!(debug_assertions) && !debug {
+                webview.connect_context_menu(|_, _, _| true);
+            } else {
+                debug!("Context menu is enabled for debugging");
+            }
+
+            if cfg!(debug_assertions) || debug {
                 if let Some(settings) = webkit6::prelude::WebViewExt::settings(&webview) {
                     settings.set_enable_developer_extras(true);
                 }
@@ -148,28 +199,17 @@ impl GtkSetup for Config {
 
             window.init_layer_shell();
             window.set_layer(wc.layer.into());
+
             // Find the specified monitor
             // (e.g. "eDP-1", "HDMI-A-1", etc.)
-            let monitor = monitors
-                .iter()
-                .filter_map(Result::ok)
-                .find(|m: &gtk4::gdk::Monitor| {
-                    if let Some(connector) = m.connector() {
-                        connector == wc.monitor
-                    } else {
-                        false
-                    }
-                });
-
-            let Some(monitor) = monitor else {
+            let Some(monitor) = monitor_map.get(&wc.monitor) else {
                 error!(
                     "Monitor '{}' not found when trying to create window '{}'",
                     wc.monitor, wc.label
                 );
+
                 continue;
             };
-
-            window.set_monitor(Some(&monitor));
 
             let geometry = monitor.geometry();
 
@@ -198,11 +238,11 @@ impl GtkSetup for Config {
                 window.set_margin(gtk4_layer_shell::Edge::Right, margin);
             }
 
-            if matches!(wc.layer, Layer::Background) {
+            if wc.layer == Layer::Background {
                 // Set keyboard mode to none so it doesn't interfere with other windows
                 window.set_keyboard_mode(gtk4_layer_shell::KeyboardMode::None);
 
-                window.set_exclusive_zone(-1); // Changed from 0 to -1
+                window.set_exclusive_zone(-1);
                 window.set_anchor(gtk4_layer_shell::Edge::Top, true);
                 window.set_anchor(gtk4_layer_shell::Edge::Bottom, true);
                 window.set_anchor(gtk4_layer_shell::Edge::Left, true);
@@ -212,12 +252,14 @@ impl GtkSetup for Config {
             window.set_resizable(false);
             window.set_decorated(false);
 
-            let ucm = webview
-                .user_content_manager()
-                .expect("WebView should have a UserContentManager");
+            let Some(ucm) = webview.user_content_manager() else {
+                error!("Failed to get UserContentManager for WebView");
+                continue;
+            };
 
             ucm.register_script_message_handler("exec", None);
 
+            // Handle exec function from frontend
             ucm.connect_script_message_received(
                 Some("exec"),
                 glib_macros::clone!(
@@ -232,7 +274,9 @@ impl GtkSetup for Config {
                             }
                         };
 
-                        handle_frontend_message(&message, &webview);
+                        glib::spawn_future_local(async move {
+                            handle_frontend_message(&message, &webview).await;
+                        });
                     }
                 ),
             );
@@ -244,25 +288,24 @@ impl GtkSetup for Config {
     }
 }
 
-fn spawn_process(message: &Message) -> Result<Child, std::io::Error> {
-    let script = message.script.clone();
+async fn spawn_process_async(message: &Message) -> Result<Child> {
     if message.is_executable.unwrap_or(false) {
-        Command::new(script)
+        Ok(Command::new(&message.script)
             .args(message.args.clone().unwrap_or_default())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()
+            .spawn()?)
     } else {
-        Command::new("sh")
+        Ok(Command::new("sh")
             .arg("-c")
-            .arg(script)
+            .arg(&message.script)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()
+            .spawn()?)
     }
 }
 
-fn handle_frontend_message(message: &Message, webview: &webkit6::WebView) {
+async fn handle_frontend_message(message: &Message, webview: &webkit6::WebView) {
     if message.action != "exec" {
         eprintln!(
             "How did you even get here? Action '{}' is not supported",
@@ -271,7 +314,7 @@ fn handle_frontend_message(message: &Message, webview: &webkit6::WebView) {
         return;
     }
 
-    let mut child = match spawn_process(message) {
+    let child = match spawn_process_async(message).await {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Failed to execute script: {}", e);
@@ -280,95 +323,93 @@ fn handle_frontend_message(message: &Message, webview: &webkit6::WebView) {
     };
 
     if message.polls.unwrap_or(false) {
-        // Handle polling command - spawn thread to read continuous output
-        let script_name = message.script.clone();
-
-        // Create a channel to send data back to main thread
-        let (tx, rx) = mpsc::channel::<String>();
-
-        // Take stdout from child before moving into thread
-        if let Some(stdout) = child.stdout.take() {
-            thread::spawn(move || {
-                let reader = BufReader::new(stdout);
-                for line in reader.lines() {
-                    match line {
-                        Ok(line_content) => {
-                            if tx.send(line_content).is_err() {
-                                // Receiver has been dropped, stop sending
-                                break;
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Error reading from polling command: {}", e);
-                            break;
-                        }
-                    }
-                }
-            });
-        }
-
-        // Clone webview for the polling loop
-        let webview_clone = webview.clone();
-
-        // Set up a recurring idle callback to check for messages
-        glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-            match rx.try_recv() {
-                Ok(line_content) => {
-                    let js_code = format!(
-                        "window.dispatchEvent(new CustomEvent('{}', {{ detail: {} }}));",
-                        script_name,
-                        serde_json::to_string(&line_content).unwrap_or_else(|_| "null".to_string())
-                    );
-                    webview_clone.evaluate_javascript(
-                        &js_code,
-                        None,
-                        None,
-                        None::<&gtk4::gio::Cancellable>,
-                        |_| {},
-                    );
-                    glib::ControlFlow::Continue
-                }
-                Err(mpsc::TryRecvError::Empty) => {
-                    // No message available, continue checking
-                    glib::ControlFlow::Continue
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    // Sender has been dropped, stop the timeout
-                    glib::ControlFlow::Break
-                }
-            }
-        });
+        handle_polling_command(message, child, webview).await;
     } else {
-        // Handle one-shot command as before
-        let output = match child.wait_with_output() {
-            Ok(o) => o,
-            Err(e) => {
-                eprintln!("Failed to read output: {}", e);
-                return;
-            }
-        };
-
-        let response = match serde_json::to_string(&String::from_utf8_lossy(&output.stdout)) {
-            Ok(res) => res,
-            Err(e) => {
-                eprintln!("Failed to serialize output: {}", e);
-                return;
-            }
-        };
-
-        let response = json!({
-            "success": output.status.success(),
-            "data": response,
-        });
-
-        // Send response back to frontend
-        let js_code = format!("window.callbackHandler('{}', {});", message.id, response);
-        webview.evaluate_javascript(
-            &js_code,
-            None,
-            None,
-            None::<&gtk4::gio::Cancellable>,
-            |_| {},
-        );
+        handle_oneshot_command(message, child, webview).await;
     }
+}
+
+async fn handle_polling_command(message: &Message, mut child: Child, webview: &webkit6::WebView) {
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+
+    // Take stdout from child
+    if let Some(stdout) = child.stdout.take() {
+        tokio::spawn(async move {
+            let reader = BufReader::new(stdout);
+            let mut lines = reader.lines();
+
+            while let Ok(Some(line)) = lines.next_line().await {
+                if tx.send(line).is_err() {
+                    // Receiver has been dropped, stop sending
+                    break;
+                }
+            }
+        });
+    }
+
+    // Clone webview for the polling loop (this stays on the main thread)
+    let webview = webview.clone();
+    let script = message.script.clone();
+
+    // Use glib's timeout to poll the Tokio channel from the main thread
+    glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+        match rx.try_recv() {
+            Ok(line_content) => {
+                let js_code = format!(
+                    "window.dispatchEvent(new CustomEvent('{}', {{ detail: {} }}));",
+                    script,
+                    serde_json::to_string(&line_content).unwrap_or_else(|_| "null".to_string())
+                );
+                webview.evaluate_javascript(
+                    &js_code,
+                    None,
+                    None,
+                    None::<&gtk4::gio::Cancellable>,
+                    |_| {},
+                );
+                glib::ControlFlow::Continue
+            }
+            Err(TryRecvError::Empty) => {
+                // No message available, continue checking
+                glib::ControlFlow::Continue
+            }
+            Err(TryRecvError::Disconnected) => {
+                // Sender has been dropped, stop the timeout
+                glib::ControlFlow::Break
+            }
+        }
+    });
+}
+
+async fn handle_oneshot_command(message: &Message, child: Child, webview: &webkit6::WebView) {
+    let output = match child.wait_with_output().await {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("Failed to read output: {}", e);
+            return;
+        }
+    };
+
+    let response = match serde_json::to_string(&String::from_utf8_lossy(&output.stdout)) {
+        Ok(res) => res,
+        Err(e) => {
+            eprintln!("Failed to serialize output: {}", e);
+            return;
+        }
+    };
+
+    let response = json!({
+        "success": output.status.success(),
+        "data": response,
+    });
+
+    // Send response back to frontend
+    let js_code = format!("window.callbackHandler('{}', {});", message.id, response);
+    webview.evaluate_javascript(
+        &js_code,
+        None,
+        None,
+        None::<&gtk4::gio::Cancellable>,
+        |_| {},
+    );
 }

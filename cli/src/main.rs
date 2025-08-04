@@ -10,6 +10,7 @@ use common::{config::Config, paths};
 use std::{
     path::PathBuf,
     process::{ExitStatus, Output, Stdio},
+    time::Duration,
 };
 
 #[derive(Debug, Clone, Parser)]
@@ -25,6 +26,9 @@ struct Args {
     /// Only build, don't run
     #[arg(short = 'b', long, action = clap::ArgAction::SetTrue, conflicts_with = "skip_build")]
     build_only: bool,
+
+    #[arg(short, long, action = clap::ArgAction::SetTrue)]
+    debug: bool,
 }
 
 #[tokio::main]
@@ -33,7 +37,7 @@ async fn main() {
 
     let mut spinner = Spinner::new()
         .with_message("Parsing configuration...")
-        .with_delay(std::time::Duration::from_millis(100))
+        .with_delay(Duration::from_millis(100))
         .start();
 
     let config = match Config::parse() {
@@ -146,7 +150,7 @@ async fn main() {
     }
 
     if !args.build_only {
-        gtk::run(config);
+        gtk::run(args.debug, config);
     }
 }
 

@@ -8,7 +8,7 @@ use gtk4::{
     glib::LogWriterOutput,
     prelude::{GtkWindowExt, WidgetExt},
 };
-use traccia::{Color, Colorize, LogLevel, Style, fatal, info};
+use traccia::{Color, Colorize, LogLevel, Style, debug, fatal, info};
 
 struct CustomFormatter;
 
@@ -30,8 +30,8 @@ impl traccia::Formatter for CustomFormatter {
     }
 }
 
-fn log_level() -> LogLevel {
-    if cfg!(debug_assertions) {
+fn log_level(debug: bool) -> LogLevel {
+    if cfg!(debug_assertions) || debug {
         LogLevel::Debug
     } else {
         LogLevel::Info
@@ -42,19 +42,25 @@ fn disable_gtk_logs() {
     gtk4::glib::log_set_writer_func(|_log_domain, _log_level| LogWriterOutput::Unhandled);
 }
 
-pub fn setup_logging() {
+pub fn setup_logging(debug: bool) {
     disable_gtk_logs();
 
     // Setup logger
     traccia::init_with_config(traccia::Config {
-        level: log_level(),
+        level: log_level(debug),
         format: Some(Box::new(CustomFormatter)),
         ..Default::default()
     });
 }
 
-pub fn run(config: Config) {
-    setup_logging();
+pub fn run(debug: bool, config: Config) {
+    setup_logging(debug);
+
+    if cfg!(debug_assertions) || debug {
+        debug!("Debug mode is enabled");
+    } else {
+        info!("Running in release mode");
+    }
 
     info!("Using configuration {}", Config::path().display());
 
@@ -70,7 +76,7 @@ pub fn run(config: Config) {
         let css_str = r"
             window {
                 background-color: transparent;
-            }            
+            }
         ";
 
         info!("Injecting css...");
@@ -89,7 +95,7 @@ pub fn run(config: Config) {
     });
 
     app.connect_activate(move |app| {
-        let windows = match config.setup_windows(&app) {
+        let windows = match config.setup_windows(&app, debug) {
             Ok(w) => w,
             Err(e) => {
                 fatal!("Failed to setup windows: {}", e);

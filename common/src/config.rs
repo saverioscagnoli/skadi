@@ -142,7 +142,7 @@ impl<'de> Deserialize<'de> for Dimension {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Layer {
     Top,
