@@ -1,195 +1,129 @@
 mod requirements;
-mod spinner;
 mod templates;
 mod vite;
 
-use crate::{requirements::Requirements, spinner::Spinner, vite::ViteWorkspace};
-use anyhow::Result;
-use clap::Parser;
-use common::{config::Config, paths};
-use std::{
-    path::PathBuf,
-    process::{ExitStatus, Output, Stdio},
-    time::Duration,
-};
+use crate::{requirements::Requirements, vite::ViteWorkspace};
+use clap::{ArgAction, Parser};
+use common::{config::Config, debug_mode, set_debug_mode, set_dev_mode};
+use std::path::PathBuf;
+use traccia::{Color, Colorize, LogLevel, Style, error, fatal, info, warn};
 
-#[derive(Debug, Clone, Parser)]
+struct CustomFormatter;
+
+impl traccia::Formatter for CustomFormatter {
+    fn format(&self, record: &traccia::Record) -> String {
+        let timestamp = chrono::Local::now()
+            .format("%b %d %H:%M:%S")
+            .to_string()
+            .color(Color::Cyan)
+            .dim();
+
+        format!(
+            "{} [{}] {}: {}",
+            timestamp,
+            record.target.dim(),
+            record.level.default_coloring().to_lowercase(),
+            record.message
+        )
+    }
+}
+
+fn log_level() -> LogLevel {
+    if debug_mode() {
+        LogLevel::Debug
+    } else {
+        LogLevel::Info
+    }
+}
+
+fn workspace_path() -> PathBuf {
+    let home = std::env::var("HOME").expect("How do you not have a HOME?");
+    let path = PathBuf::from(home)
+        .join(".local")
+        .join("share")
+        .join("skadi");
+
+    return path;
+}
+
+#[derive(Debug, Parser)]
 struct Args {
-    /// Skip the build process
-    #[arg(short = 's', long, action = clap::ArgAction::SetTrue, conflicts_with = "build_only")]
-    skip_build: bool,
-
-    /// Skip requirements check
-    #[arg(short = 'r', long, action = clap::ArgAction::SetTrue)]
+    /// Skip checking for requirements.
+    #[arg(long, action = ArgAction::SetTrue, default_value_t = false)]
     skip_requirements: bool,
 
-    /// Only build, don't run
-    #[arg(short = 'b', long, action = clap::ArgAction::SetTrue, conflicts_with = "skip_build")]
-    build_only: bool,
+    /// Skip building the Vite project.
+    /// This will skip npm install and such
+    #[arg(long, action = ArgAction::SetTrue, default_value_t = false, conflicts_with = "development")]
+    skip_vite: bool,
 
-    #[arg(short, long, action = clap::ArgAction::SetTrue)]
+    /// Enable development mode.
+    /// This will run the Vite dev server instead of building for production
+    #[arg(long = "dev", action = ArgAction::SetTrue, default_value_t = false)]
+    development: bool,
+
+    /// Enable debug logging and other debug features like web inspector
+    #[arg(long, action = ArgAction::SetTrue, default_value_t = false)]
     debug: bool,
+
+    /// Path to the workspace directory.
+    /// This is where the frontend files will live and where the vite server will run
+    #[arg(long, default_value_t = workspace_path().to_string_lossy().to_string(), conflicts_with = "skip_vite")]
+    workspace_dir: String,
+
+    /// Shows the output of vite commands in the terminal
+    #[arg(long, action = ArgAction::SetTrue, default_value_t = false)]
+    show_output: bool,
 }
 
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
 
-    let mut spinner = Spinner::new()
-        .with_message("Parsing configuration...")
-        .with_delay(Duration::from_millis(100))
-        .start();
+    set_debug_mode(args.debug);
+    set_dev_mode(args.development);
 
-    let config = match Config::parse() {
+    traccia::init_with_config(traccia::Config {
+        level: log_level(),
+        format: Some(Box::new(CustomFormatter)),
+        ..Default::default()
+    });
+
+    if args.skip_requirements {
+        warn!(
+            "Skipping requirements check. This may lead to runtime errors if required binaries are missing."
+        );
+    } else {
+        let req = Requirements::new().await;
+
+        if let Err(e) = req.check_all().await {
+            error!("Failed to check requirements: {}", e);
+            error!("Please manually ensure that node.js and npm are installed.");
+        }
+    }
+
+    let config = match Config::parse().await {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("{}", e);
+            fatal!("Failed to parse configuration: {}", e);
             return;
         }
     };
 
-    if !args.skip_requirements {
-        spinner.update_message("Checking requirements...");
+    info!("Using configuration {}", config.path().display());
 
-        let req = Requirements::new().await;
-        let mut root_granted = false;
+    let workspace_path = PathBuf::from(&args.workspace_dir);
 
-        if !req.check("node") {
-            if !req.check_root() {
-                spinner.finish_with_symbol_and_message(
-                    "⚠️",
-                    format!(
-                        "Please enter root password to install Node.js. This command will run:\n{}",
-                        req.distro.install_command("nodejs")
-                    )
-                    .as_str(),
-                );
-
-                if let Ok(status) = spawn_process_quiet("sudo", &["-v"], None).await {
-                    if status.success() {
-                        root_granted = true;
-                    } else {
-                        eprintln!("Failed to run sudo command.");
-                        return;
-                    }
-                } else {
-                    eprintln!("Failed to run sudo command.");
-                    return;
-                }
-
-                print!("\x1B[1A\x1B[2K");
-                spinner = Spinner::new()
-                    .with_message("Installing Node.js...")
-                    .with_delay(std::time::Duration::from_millis(100))
-                    .start();
-            }
-
-            if let Err(e) = req.install_package("nodejs").await {
-                eprintln!("Failed to install Node.js: {}", e);
-                return;
-            }
-
-            spinner.update_message("Node.js installed successfully.");
-        } else {
-            spinner.update_message("Node.js is installed.");
-        }
-
-        if !req.check("npm") {
-            if !root_granted && !req.check_root() {
-                spinner.finish_with_symbol_and_message(
-                    "⚠️",
-                    format!(
-                        "Please enter root password to install Node.js. This command will run:\n{}",
-                        req.distro.install_command("npm")
-                    )
-                    .as_str(),
-                );
-
-                spawn_process_quiet("sudo", &["-v"], None).await.ok();
-            }
-
-            print!("\x1B[1A\x1B[2K");
-            spinner = Spinner::new()
-                .with_message("Installing Node.js...")
-                .with_delay(std::time::Duration::from_millis(100))
-                .start();
-
-            if let Err(e) = req.install_package("npm").await {
-                eprintln!("Failed to install npm: {}", e);
-                return;
-            }
-
-            spinner.update_message("npm installed successfully.");
-        } else {
-            spinner.update_message("npm is installed.");
-        }
+    if args.skip_vite {
+        warn!("Skipping vite initialization. Ensure that the project was built previously.");
     } else {
-        spinner.finish_with_symbol_and_message(
-            "⚠️",
-            "Skipping requirements check. Make sure to have Node.js and npm installed.",
-        );
-    }
+        let vite = ViteWorkspace::new(&workspace_path);
 
-    let Some(root) = paths::local() else {
-        eprintln!("Failed to find the root path for the project.");
-        return;
-    };
-
-    if !args.skip_build {
-        let vite = ViteWorkspace::new(root);
-
-        if let Err(e) = vite.init(&config, spinner).await {
-            eprintln!("Failed to initialize Vite workspace: {}", e);
+        if let Err(e) = vite.init(&config, &args).await {
+            fatal!("Failed to initialize Vite workspace: {}", e);
             return;
         }
-    } else {
-        spinner.finish_with_symbol_and_message(
-            "⚠️",
-            "Skipping build process. Make sure to run `skadi build` before running the application with this flag.",
-        );
     }
 
-    if !args.build_only {
-        gtk::run(args.debug, config);
-    }
-}
-
-pub async fn spawn_process_quiet<T: AsRef<str>>(
-    cmd: T,
-    args: &[&str],
-    path: Option<&PathBuf>,
-) -> Result<ExitStatus> {
-    let path = path.map(|p| p.as_path());
-    let mut builder = tokio::process::Command::new(cmd.as_ref());
-
-    if let Some(path) = path {
-        builder.current_dir(path);
-    }
-
-    builder.args(args);
-    builder.stdout(Stdio::null());
-    builder.stderr(Stdio::null());
-
-    let status = builder.status().await?;
-
-    Ok(status)
-}
-
-pub async fn spawn_process_output<T: AsRef<str>>(
-    cmd: T,
-    args: &[&str],
-    path: Option<&PathBuf>,
-) -> Result<Output> {
-    let path = path.map(|p| p.as_path());
-    let mut builder = tokio::process::Command::new(cmd.as_ref());
-
-    if let Some(path) = path {
-        builder.current_dir(path);
-    }
-
-    builder.args(args);
-
-    let output = builder.output().await?;
-
-    Ok(output)
+    gtk::run(&config, &workspace_path);
 }

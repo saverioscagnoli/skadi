@@ -1,12 +1,10 @@
-use anyhow::{Result, anyhow};
 use gtk4_layer_shell::LayerShell;
 use serde::{
     Deserialize, Deserializer,
     de::{self, Visitor},
 };
-use std::{fmt, fs, path::PathBuf};
-
-use crate::paths;
+use std::{fmt, path::PathBuf};
+use tokio::fs;
 
 #[derive(Debug, Clone)]
 pub enum Anchor {
@@ -216,14 +214,36 @@ pub struct WindowConfig {
 
     #[serde(default)]
     pub plugins: Vec<PathBuf>,
+
+    #[serde(default)]
+    pub styles: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
+    #[serde(skip)]
+    path: PathBuf,
     pub windows: Vec<WindowConfig>,
 }
 
 impl Config {
+    const POSSIBLE_NAMES: [&'static str; 6] = [
+        "config.toml",
+        "config.yaml",
+        "config.yml",
+        "config.json",
+        "config.json5",
+        "config.jsonc",
+    ];
+
+    /// ~/.config/skadi
+    pub fn dir() -> Option<PathBuf> {
+        let home = std::env::var("HOME").ok()?;
+        let path = PathBuf::from(home).join(".config").join("skadi");
+
+        Some(path)
+    }
+
     pub fn default_layer() -> Layer {
         Layer::Top
     }
@@ -232,39 +252,42 @@ impl Config {
         false
     }
 
-    pub fn path() -> PathBuf {
-        paths::config()
-            .map(|p| p.join("config.json"))
-            .unwrap_or_else(|| PathBuf::from("config.json"))
-    }
+    pub async fn parse() -> Result<Self, Box<dyn std::error::Error>> {
+        let path = Self::find_config_file()?;
+        let content = fs::read_to_string(&path).await?;
 
-    pub fn parse() -> Result<Self> {
-        let path = paths::config()
-            .map(|p| p.join("config.json"))
-            .ok_or_else(|| anyhow!("Could not find or create configuration directory"))?;
+        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
 
-        let content = match fs::read_to_string(&path) {
-            Ok(c) => c,
-            Err(e) => {
-                return Err(anyhow!(
-                    "Failed to read config file {}: {}",
-                    path.display(),
-                    e
-                ));
-            }
+        let mut config: Self = match ext {
+            "toml" => toml::from_str(&content)?,
+            "yaml" | "yml" => serde_yaml::from_str(&content)?,
+            "json" => serde_json::from_str(&content)?,
+            "json5" => json5::from_str(&content)?,
+            "jsonc" => json5::from_str(&content)?, // jsonc is similar to json5
+            _ => return Err(format!("Unsupported config file format: {}", ext).into()),
         };
 
-        let config = match serde_json::from_str(&content) {
-            Ok(c) => c,
-            Err(e) => {
-                return Err(anyhow!(
-                    "Failed to parse config file {}: {}",
-                    path.display(),
-                    e
-                ));
-            }
-        };
+        config.path = path;
 
         Ok(config)
+    }
+
+    fn find_config_file() -> Result<PathBuf, Box<dyn std::error::Error>> {
+        let Some(config_dir) = Self::dir() else {
+            return Err("Config directory not found".into());
+        };
+
+        for filename in &Self::POSSIBLE_NAMES {
+            let path = config_dir.join(filename);
+            if path.exists() {
+                return Ok(path);
+            }
+        }
+
+        Err("No config file found".into())
+    }
+
+    pub fn path(&self) -> &PathBuf {
+        &self.path
     }
 }

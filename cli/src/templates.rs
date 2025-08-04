@@ -1,23 +1,29 @@
-use anyhow::Result;
 use chrono::Datelike;
+use phf::{Map, phf_map};
 use std::path::{Path, PathBuf};
-use tokio::fs;
+use tokio::{fs, io};
+use traccia::debug;
 
-pub struct Templates {}
+pub struct Templates;
 
 impl Templates {
-    const MAP: phf::Map<&'static str, &'static str> = phf::phf_map! {
-        "package.json" => include_str!("../../templates/package.json"),
-        "vite.config.js" => include_str!("../../templates/vite.config.js"),
+    const FILES: Map<&'static str, &'static str> = phf_map! {
         "index.css" => include_str!("../../templates/index.css"),
+        "package.json" => include_str!("../../templates/package.json"),
+        "tailwind.config.js" => include_str!("../../templates/tailwind.config.js"),
         "utils.js" => include_str!("../../templates/utils.js"),
+        "vite.config.js" => include_str!("../../templates/vite.config.js")
     };
 
-    pub async fn write_all<P: AsRef<Path>>(dir: P) -> Result<()> {
+    pub async fn write_all<P: AsRef<Path>>(dir: P) -> io::Result<()> {
         let dir = dir.as_ref();
 
-        for (name, content) in Self::MAP.entries() {
-            fs::write(dir.join(name), *content).await?;
+        for (name, content) in Self::FILES.entries() {
+            let path = dir.join(name);
+
+            fs::write(&path, content).await?;
+
+            debug!("Wrote template file: {}", path.display());
         }
 
         Ok(())
@@ -47,8 +53,8 @@ impl Templates {
 
     pub fn jsx_index<L: AsRef<str>>(
         label: L,
-        styles: &Vec<String>,
-        plugins_path: &Vec<PathBuf>,
+        styles: &Vec<PathBuf>,
+        plugins: &Vec<PathBuf>,
     ) -> String {
         let label = label.as_ref();
 
@@ -80,17 +86,17 @@ impl Templates {
               </div>
             );
             "#,
-            Templates::mit_license(),
+            Self::mit_license(),
             styles
                 .iter()
-                .map(|p| format!("import \"{}\";", p))
+                .map(|p| format!("import \"{}\";", p.display()))
                 .collect::<Vec<_>>()
                 .join(",\n"),
-            plugins_path
+            plugins
                 .iter()
-                .map(|p| format!("React.lazy(() => import (\"{}\")),", p.display()))
+                .map(|p| format!("React.lazy(() => import(\"{}\"))", p.display()))
                 .collect::<Vec<_>>()
-                .join("\n"),
+                .join(",\n"),
             label,
             label
         )
@@ -98,6 +104,7 @@ impl Templates {
 
     pub fn mit_license() -> String {
         let year = chrono::Utc::now().year();
+
         format!(
             r#"
         // MIT License
