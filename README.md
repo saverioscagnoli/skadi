@@ -2,6 +2,8 @@
 
 Skadi is a web-powered widget system, it is powered by webkit6 and gtk, making it extremely customizable by using web techologies and frameworks like React, Svelte, Vue, etc.
 
+Currently only React is supported.
+
 ## If you're concerned about resources
 
 Keep in mind that since it is powered by webkit6, this will be pretty memory intensive, and it WILL take a lot of ram. (on my system: arch x86_64 32gb takes up about 200MB of ram), So if that's a concern, please consider something else like [eww](https://github.com/elkowar/eww).
@@ -25,6 +27,22 @@ sudo cp ./target/release/skadi /usr/bin
 ## Usage
 
 This is basically an automated vite project managed by a cli and ad webkit6 app to display them.
+
+You can execute scripts and programs with `exec`, and listen to events with `useLisen`. (See [utils.js](./templates/utils.js))
+
+For events to be picked up by `useListen` you need to put the script's full path as the event name, and the script must print json output to stdout, that will be parsed and passed to the callback.
+
+For polling scripts, like system monitoring, when calling `exec`, the `polls` flag must be set to true; like this:
+
+```js
+exec({ script: "script-name", polls: true });
+```
+
+and then you can use
+
+```ts
+useListen<T>("script-name", (data: T) => {});
+```
 
 ### Cli args
 
