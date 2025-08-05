@@ -286,6 +286,10 @@ fn setup_windows(
             }
         }
 
+        // Set after initializing layer shell
+        // Otherwise it won't work correctly
+        window.set_monitor(Some(monitor));
+
         if let Some(margin) = w.margin_top {
             window.set_margin(gtk4_layer_shell::Edge::Top, margin);
         }
