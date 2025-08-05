@@ -44,6 +44,33 @@ and then you can use
 useListen<T>("script-name", (data: T) => {});
 ```
 
+## Configuration
+
+You have to use the configuration placed at ~/.config/skadi/config(.json,.jsonc,.json5,.toml,.yaml)
+
+This is an example:
+
+```json
+{
+  "windows": [
+    {
+      "label": "topbar",
+      "monitor": "DP-1",
+      "x": 0,
+      "y": 4,
+      "width": "99.5%",
+      "height": "40",
+      "anchor": "top center",
+      "exclusive": true,
+      "plugins": ["./plugins/topbar.tsx"],
+      "styles": ["./styles/style.css"]
+    }
+  ]
+}
+```
+
+You can look at properties in [source](./common/src/config.rs)
+
 ### Cli args
 
 - `--skip-requirements`: Skips checking for requirements like nodejs and npm
