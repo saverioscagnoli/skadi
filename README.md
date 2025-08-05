@@ -2,6 +2,9 @@
 
 Skadi is a web-powered widget system, it is powered by webkit6 and gtk, making it extremely customizable by using web techologies and frameworks like React, Svelte, Vue, etc.
 
+## Note:
+
+This is still in very early development
 Currently only React is supported.
 
 ## If you're concerned about resources
