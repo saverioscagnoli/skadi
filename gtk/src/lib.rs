@@ -226,28 +226,6 @@ fn setup_windows(
         if debug_mode() {
             if let Some(settings) = webkit6::prelude::WebViewExt::settings(&webview) {
                 settings.set_enable_developer_extras(true);
-
-                // if dev {
-                //     // Essential settings for dev mode
-                //     settings.set_allow_file_access_from_file_urls(true);
-                //     settings.set_allow_universal_access_from_file_urls(true);
-                //     settings.set_enable_javascript(true);
-                //     settings.set_javascript_can_access_clipboard(true);
-                //     settings.set_javascript_can_open_windows_automatically(true);
-
-                //     // Disable all security restrictions for dev
-                //     settings.set_disable_web_security(true);
-                //     settings.set_allow_modal_dialogs(true);
-                //     settings.set_media_playback_requires_user_gesture(false);
-
-                //     // Allow loading of modules and scripts from any origin
-                //     settings.set_allow_top_navigation_to_data_urls(true);
-
-                //     // Set a proper user agent
-                //     settings.set_user_agent(Some(
-                //         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                //     ));
-                // }
             }
         }
 
@@ -263,8 +241,14 @@ fn setup_windows(
 
         window.set_child(Some(&webview));
 
-        window.init_layer_shell();
-        window.set_layer(w.layer.into());
+        // Check if we need layer shell functionality or regular window positioning
+        let use_layer_shell = w.layer != common::config::Layer::Top
+            || w.exclusive
+            || w.margin_top.is_some()
+            || w.margin_bottom.is_some()
+            || w.margin_left.is_some()
+            || w.margin_right.is_some()
+            || (w.x != 0 || w.y != 0); // Use layer shell for positioning too
 
         // Find the specified monitor
         // (e.g. "eDP-1", "HDMI-A-1", etc.)
@@ -285,11 +269,22 @@ fn setup_windows(
         window.set_width_request(width);
         window.set_height_request(height);
 
-        if w.exclusive {
-            window.auto_exclusive_zone_enable();
-        }
+        if use_layer_shell {
+            // Use layer shell for overlay functionality
+            window.init_layer_shell();
+            window.set_layer(w.layer.into());
 
-        w.anchor.apply(&window);
+            if w.exclusive {
+                window.auto_exclusive_zone_enable();
+            }
+
+            // Use positioning with x/y coordinates if provided
+            if w.x != 0 || w.y != 0 {
+                w.anchor.apply_with_position(&window, w.x, w.y);
+            } else {
+                w.anchor.apply(&window);
+            }
+        }
 
         if let Some(margin) = w.margin_top {
             window.set_margin(gtk4_layer_shell::Edge::Top, margin);

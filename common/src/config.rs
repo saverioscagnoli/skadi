@@ -101,6 +101,60 @@ impl Anchor {
             }
         }
     }
+
+    /// Apply positioning using x/y coordinates with layer shell margins
+    pub fn apply_with_position(&self, window: &gtk4::ApplicationWindow, x: i64, y: i64) {
+        // First apply the base anchor
+        self.apply(window);
+
+        // Then adjust margins based on x/y coordinates
+        if x != 0 || y != 0 {
+            match self {
+                Anchor::TopLeft => {
+                    window.set_margin(gtk4_layer_shell::Edge::Left, x as i32);
+                    window.set_margin(gtk4_layer_shell::Edge::Top, y as i32);
+                }
+                Anchor::TopRight => {
+                    window.set_margin(gtk4_layer_shell::Edge::Right, x as i32);
+                    window.set_margin(gtk4_layer_shell::Edge::Top, y as i32);
+                }
+                Anchor::TopCenter => {
+                    // For center positioning, x represents offset from center
+                    window.set_margin(gtk4_layer_shell::Edge::Top, y as i32);
+                    // Note: Horizontal centering with offset is complex
+                }
+                Anchor::BottomLeft => {
+                    window.set_margin(gtk4_layer_shell::Edge::Left, x as i32);
+                    window.set_margin(gtk4_layer_shell::Edge::Bottom, y as i32);
+                }
+                Anchor::BottomRight => {
+                    window.set_margin(gtk4_layer_shell::Edge::Right, x as i32);
+                    window.set_margin(gtk4_layer_shell::Edge::Bottom, y as i32);
+                }
+                Anchor::BottomCenter => {
+                    window.set_margin(gtk4_layer_shell::Edge::Bottom, y as i32);
+                }
+                Anchor::Top => {
+                    window.set_margin(gtk4_layer_shell::Edge::Top, y as i32);
+                }
+                Anchor::Bottom => {
+                    window.set_margin(gtk4_layer_shell::Edge::Bottom, y as i32);
+                }
+                Anchor::Left => {
+                    window.set_margin(gtk4_layer_shell::Edge::Left, x as i32);
+                }
+                Anchor::Right => {
+                    window.set_margin(gtk4_layer_shell::Edge::Right, x as i32);
+                }
+                Anchor::Center => {
+                    // For true center positioning with offset, we need a different approach
+                    eprintln!(
+                        "Center positioning with x/y offset is not directly supported with layer shell"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -194,6 +248,8 @@ pub struct WindowConfig {
     pub monitor: String,
     pub label: String,
     pub width: Dimension,
+    pub x: i64,
+    pub y: i64,
     pub height: Dimension,
     pub anchor: Anchor,
 
