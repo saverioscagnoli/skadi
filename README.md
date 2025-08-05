@@ -93,6 +93,10 @@ Nodejs and npm will be automatically detected at the start of the program if not
 My personal topbar
 ![my-bar](./docs/screenshots/my-bar.png)
 
+You can look in the [examples/topbar](./examples/topbar/) directory for it.
+
+Keep in mind you need to edit the path to the script files.
+
 You can contribute some examples if you'd like!
 
 ## License
