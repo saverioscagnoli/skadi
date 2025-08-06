@@ -429,6 +429,16 @@ async fn handle_polling_command(message: &ExecMessage, mut child: Child, webview
                     script,
                     serde_json::to_string(&line_content).unwrap_or_else(|_| "null".to_string())
                 );
+
+                if debug_mode() {
+                    debug!(
+                        "dispatching '{}' with payload: {}",
+                        script,
+                        serde_json::to_string_pretty(&line_content)
+                            .unwrap_or_else(|_| "null".to_string())
+                    );
+                }
+
                 webview.evaluate_javascript(
                     &js_code,
                     None,
@@ -459,18 +469,14 @@ async fn handle_oneshot_command(message: &ExecMessage, child: Child, webview: &w
         }
     };
 
-    let response = match serde_json::to_string(&String::from_utf8_lossy(&output.stdout)) {
-        Ok(res) => res,
-        Err(e) => {
-            eprintln!("Failed to serialize output: {}", e);
-            return;
-        }
-    };
+    let data = String::from_utf8_lossy(&output.stdout).to_string();
 
     let response = json!({
         "success": output.status.success(),
-        "data": response,
+        "data": data,
     });
+
+    debug!("exec response: {}", response);
 
     // Send response back to frontend
     let js_code = format!("window.callbackHandler('{}', {});", message.id, response);
