@@ -1,63 +1,114 @@
+use core::fmt;
+use std::{error::Error, path::PathBuf};
+
 use gtk4_layer_shell::LayerShell;
 use serde::{
     Deserialize, Deserializer,
     de::{self, Visitor},
 };
-use std::{fmt, path::PathBuf};
-use tokio::fs;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Dimension {
+    Pixel(i32),
+    Percentage(f32),
+}
+
+impl Dimension {
+    pub fn as_pixel(&self, total: i32) -> i32 {
+        match self {
+            Self::Pixel(p) => *p,
+            Self::Percentage(p) => (total as f32 * p / 100.0).round() as i32,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Dimension {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct DimensionVisitor;
+
+        impl<'de> Visitor<'de> for DimensionVisitor {
+            type Value = Dimension;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a string like \"50%\" or \"100\", or a number")
+            }
+
+            fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if s.ends_with('%') {
+                    let percent_str = &s[..s.len() - 1];
+                    let percent: f32 = percent_str
+                        .parse()
+                        .map_err(|_| E::custom(format!("Invalid percentage: {}", s)))?;
+                    Ok(Dimension::Percentage(percent))
+                } else {
+                    let pixels: i32 = s
+                        .parse()
+                        .map_err(|_| E::custom(format!("Invalid pixel value: {}", s)))?;
+                    Ok(Dimension::Pixel(pixels))
+                }
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(Dimension::Pixel(value as i32))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                if value < 0 {
+                    return Err(E::custom("pixel value cannot be negative"));
+                }
+                Ok(Dimension::Pixel(value as i32))
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(Dimension::Pixel(value.round() as i32))
+            }
+        }
+
+        deserializer.deserialize_any(DimensionVisitor)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Anchor {
     Top,
     Left,
     Right,
     Bottom,
     Center,
+
+    #[serde(alias = "top-left", alias = "top left")]
     TopLeft,
+
+    #[serde(alias = "top-right", alias = "top right")]
     TopRight,
+
+    #[serde(alias = "top-center", alias = "top center")]
     TopCenter,
+
+    #[serde(alias = "bottom-left", alias = "bottom left")]
     BottomLeft,
+
+    #[serde(alias = "bottom-right", alias = "bottom right")]
     BottomRight,
+
+    #[serde(alias = "bottom-center", alias = "bottom center")]
     BottomCenter,
-}
-
-impl<'de> Deserialize<'de> for Anchor {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct AnchorVisitor;
-
-        impl<'de> Visitor<'de> for AnchorVisitor {
-            type Value = Anchor;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("an anchor string like 'top', 'left', 'top center', etc.")
-            }
-
-            fn visit_str<E>(self, value: &str) -> Result<Anchor, E>
-            where
-                E: de::Error,
-            {
-                match value.to_lowercase().as_str() {
-                    "top" => Ok(Anchor::Top),
-                    "left" => Ok(Anchor::Left),
-                    "right" => Ok(Anchor::Right),
-                    "bottom" => Ok(Anchor::Bottom),
-                    "center" => Ok(Anchor::Center),
-                    "top left" | "topleft" => Ok(Anchor::TopLeft),
-                    "top right" | "topright" => Ok(Anchor::TopRight),
-                    "top center" | "topcenter" => Ok(Anchor::TopCenter),
-                    "bottom left" | "bottomleft" => Ok(Anchor::BottomLeft),
-                    "bottom right" | "bottomright" => Ok(Anchor::BottomRight),
-                    "bottom center" | "bottomcenter" => Ok(Anchor::BottomCenter),
-                    _ => Err(E::custom(format!("unknown anchor: {}", value))),
-                }
-            }
-        }
-
-        deserializer.deserialize_str(AnchorVisitor)
-    }
 }
 
 impl Anchor {
@@ -101,97 +152,6 @@ impl Anchor {
             }
         }
     }
-
-    /// Apply positioning using x/y coordinates with layer shell margins
-    pub fn apply_with_position(&self, window: &gtk4::ApplicationWindow, x: i64, y: i64) {
-        // First apply the base anchor
-        self.apply(window);
-
-        // Then adjust margins based on x/y coordinates
-        if x != 0 || y != 0 {
-            match self {
-                Anchor::TopLeft => {
-                    window.set_margin(gtk4_layer_shell::Edge::Left, x as i32);
-                    window.set_margin(gtk4_layer_shell::Edge::Top, y as i32);
-                }
-                Anchor::TopRight => {
-                    window.set_margin(gtk4_layer_shell::Edge::Right, x as i32);
-                    window.set_margin(gtk4_layer_shell::Edge::Top, y as i32);
-                }
-                Anchor::TopCenter => {
-                    // For center positioning, x represents offset from center
-                    window.set_margin(gtk4_layer_shell::Edge::Top, y as i32);
-                    // Note: Horizontal centering with offset is complex
-                }
-                Anchor::BottomLeft => {
-                    window.set_margin(gtk4_layer_shell::Edge::Left, x as i32);
-                    window.set_margin(gtk4_layer_shell::Edge::Bottom, y as i32);
-                }
-                Anchor::BottomRight => {
-                    window.set_margin(gtk4_layer_shell::Edge::Right, x as i32);
-                    window.set_margin(gtk4_layer_shell::Edge::Bottom, y as i32);
-                }
-                Anchor::BottomCenter => {
-                    window.set_margin(gtk4_layer_shell::Edge::Bottom, y as i32);
-                }
-                Anchor::Top => {
-                    window.set_margin(gtk4_layer_shell::Edge::Top, y as i32);
-                }
-                Anchor::Bottom => {
-                    window.set_margin(gtk4_layer_shell::Edge::Bottom, y as i32);
-                }
-                Anchor::Left => {
-                    window.set_margin(gtk4_layer_shell::Edge::Left, x as i32);
-                }
-                Anchor::Right => {
-                    window.set_margin(gtk4_layer_shell::Edge::Right, x as i32);
-                }
-                Anchor::Center => {
-                    // For true center positioning with offset, we need a different approach
-                    eprintln!(
-                        "Center positioning with x/y offset is not directly supported with layer shell"
-                    );
-                }
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum Dimension {
-    Pixel(i32),
-    Percentage(f32),
-}
-
-impl Dimension {
-    pub fn as_pixel(&self, total: i32) -> i32 {
-        match self {
-            Dimension::Pixel(p) => *p,
-            Dimension::Percentage(p) => (total as f32 * p / 100.0).round() as i32,
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for Dimension {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-
-        if s.ends_with('%') {
-            let percent_str = &s[..s.len() - 1];
-            let percent: f32 = percent_str
-                .parse()
-                .map_err(|_| serde::de::Error::custom(format!("Invalid percentage: {}", s)))?;
-            Ok(Dimension::Percentage(percent))
-        } else {
-            let pixels: i32 = s
-                .parse()
-                .map_err(|_| serde::de::Error::custom(format!("Invalid pixel value: {}", s)))?;
-            Ok(Dimension::Pixel(pixels))
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -203,9 +163,15 @@ pub enum Layer {
     Overlay,
 }
 
-impl From<Layer> for gtk4_layer_shell::Layer {
-    fn from(layer: Layer) -> Self {
-        match layer {
+impl Default for Layer {
+    fn default() -> Self {
+        Layer::Top
+    }
+}
+
+impl Into<gtk4_layer_shell::Layer> for Layer {
+    fn into(self) -> gtk4_layer_shell::Layer {
+        match self {
             Layer::Top => gtk4_layer_shell::Layer::Top,
             Layer::Bottom => gtk4_layer_shell::Layer::Bottom,
             Layer::Background => gtk4_layer_shell::Layer::Background,
@@ -214,136 +180,65 @@ impl From<Layer> for gtk4_layer_shell::Layer {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Framework {
-    React,
-    Vue,
-    Svelte,
-    Solid,
-    Vanilla,
+#[derive(Debug, Clone, Deserialize)]
+pub struct Margins {
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
+    pub left: i32,
 }
 
-impl<'de> Deserialize<'de> for Framework {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        match s.to_lowercase().as_str() {
-            "react" => Ok(Framework::React),
-            "vue" => Ok(Framework::Vue),
-            "svelte" => Ok(Framework::Svelte),
-            "solid" => Ok(Framework::Solid),
-            "vanilla" => Ok(Framework::Vanilla),
-            _ => Err(serde::de::Error::custom(format!(
-                "Unknown framework: {}",
-                s
-            ))),
+impl Default for Margins {
+    fn default() -> Self {
+        Margins {
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0,
         }
     }
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct WindowConfig {
-    pub monitor: String,
+    pub monitors: Vec<String>,
     pub label: String,
     pub width: Dimension,
+    pub height: Dimension,
     pub x: i64,
     pub y: i64,
-    pub height: Dimension,
     pub anchor: Anchor,
 
-    #[serde(default = "Config::default_layer")]
+    #[serde(default)]
     pub layer: Layer,
 
-    #[serde(default = "Config::default_exclusive")]
+    #[serde(default)]
     pub exclusive: bool,
 
     #[serde(default)]
-    pub margin_top: Option<i32>,
-    #[serde(default)]
-    pub margin_bottom: Option<i32>,
-    #[serde(default)]
-    pub margin_left: Option<i32>,
-    #[serde(default)]
-    pub margin_right: Option<i32>,
-
-    #[serde(default)]
-    pub plugins: Vec<PathBuf>,
-
-    #[serde(default)]
-    pub styles: Vec<PathBuf>,
+    pub margins: Margins,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
+    /// Path is here for ease of access outside of the struct, but is not serialized/deserialized.
     #[serde(skip)]
-    path: PathBuf,
+    pub path: PathBuf,
     pub windows: Vec<WindowConfig>,
 }
 
 impl Config {
-    const POSSIBLE_NAMES: [&'static str; 6] = [
-        "config.toml",
-        "config.yaml",
-        "config.yml",
-        "config.json",
-        "config.json5",
-        "config.jsonc",
-    ];
-
-    /// ~/.config/skadi
-    pub fn dir() -> Option<PathBuf> {
-        let home = std::env::var("HOME").ok()?;
-        let path = PathBuf::from(home).join(".config").join("skadi");
-
-        Some(path)
-    }
-
-    pub fn default_layer() -> Layer {
-        Layer::Top
-    }
-
-    pub fn default_exclusive() -> bool {
-        false
-    }
-
-    pub async fn parse() -> Result<Self, Box<dyn std::error::Error>> {
-        let path = Self::find_config_file()?;
-        let content = fs::read_to_string(&path).await?;
-
-        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-
-        let mut config: Self = match ext {
-            "toml" => toml::from_str(&content)?,
-            "yaml" | "yml" => serde_yaml::from_str(&content)?,
-            "json" => serde_json::from_str(&content)?,
-            "json5" => json5::from_str(&content)?,
-            "jsonc" => json5::from_str(&content)?, // jsonc is similar to json5
-            _ => return Err(format!("Unsupported config file format: {}", ext).into()),
+    pub fn parse() -> Result<Self, Box<dyn Error>> {
+        let Some(config_path) = dirs::config_dir().map(|p| p.join("wwwidgets").join("config.json"))
+        else {
+            return Err("Could not determine config directory".into());
         };
 
-        config.path = path;
+        let content = std::fs::read_to_string(&config_path)?;
+        let mut config: Self = serde_json::from_str(&content)?;
+
+        config.path = config_path;
 
         Ok(config)
-    }
-
-    fn find_config_file() -> Result<PathBuf, Box<dyn std::error::Error>> {
-        let Some(config_dir) = Self::dir() else {
-            return Err("Config directory not found".into());
-        };
-
-        for filename in &Self::POSSIBLE_NAMES {
-            let path = config_dir.join(filename);
-            if path.exists() {
-                return Ok(path);
-            }
-        }
-
-        Err("No config file found".into())
-    }
-
-    pub fn path(&self) -> &PathBuf {
-        &self.path
     }
 }

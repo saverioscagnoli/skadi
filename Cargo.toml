@@ -1,11 +1,17 @@
 [package]
-name = "skadi"
+name = "wwwidgets"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-path = "cli"
+path = "wwwidgets"
 
 [workspace]
-default-members = ["cli"]
-members = ["cli", "gtk", "common"]
+default-members = ["wwwidgets"]
+members = ["wwwidgets", "app", "common"]
+
+[workspace.dependencies]
+common = { path = "common" }
+traccia = "2.2.5"
+gtk4 = "0.10.2"
+gtk4-layer-shell = "0.7.0"
