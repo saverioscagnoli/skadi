@@ -1,4 +1,5 @@
 mod requirements;
+mod vite;
 
 use clap::Parser;
 use common::config::Config;
@@ -64,8 +65,9 @@ fn main() {
         }
     };
 
+    vite::init();
+
     if let Err(e) = app::setup_widgets(config) {
         fatal!("Application error: {}", e);
-        return;
     }
 }

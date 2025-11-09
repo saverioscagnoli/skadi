@@ -6,7 +6,7 @@ use std::{
 use traccia::{Colorize, Style, info, warn};
 use which::which;
 
-const NODEJS_SCRIPT: &'static str = r#"
+const NODEJS_SCRIPT: &str = r#"
     # Download and install nvm
     curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 
@@ -19,15 +19,14 @@ const NODEJS_SCRIPT: &'static str = r#"
 
 #[derive(Debug)]
 enum Distro {
-    Debian,   // apt install <package>
-    Ubuntu,   // apt install <package>
-    Fedora,   // dnf install <package>
-    Arch,     // pacman -S <package>
-    Manjaro,  // pacman -S <package>
-    OpenSUSE, // zypper install <package>
-    Mint,     // apt install <package>
-    PopOS,    // apt install <package>
-    Other,    // Use nvm
+    Debian,  // apt install <package>
+    Ubuntu,  // apt install <package>
+    Fedora,  // dnf install <package>
+    Arch,    // pacman -S <package>
+    Manjaro, // pacman -S <package>
+    Mint,    // apt install <package>
+    PopOS,   // apt install <package>
+    Other,   // Use nvm
 }
 
 impl Distro {
@@ -46,8 +45,6 @@ impl Distro {
                 return Self::Arch;
             } else if lower.contains("id=manjaro") || lower.contains("id=\"manjaro\"") {
                 return Self::Manjaro;
-            } else if lower.contains("id=opensuse") || lower.contains("id=\"opensuse\"") {
-                return Self::OpenSUSE;
             } else if lower.contains("id=linuxmint") || lower.contains("id=\"linuxmint\"") {
                 return Self::Mint;
             } else if lower.contains("id=pop") || lower.contains("id=\"pop\"") {
@@ -69,14 +66,13 @@ impl Distro {
 
     fn install_node(&self) -> &str {
         match self {
-            Self::Debian => "sudo apt install nodejs",
-            Self::Ubuntu => "sudo apt install nodejs",
-            Self::Fedora => "sudo dnf install nodejs",
-            Self::Arch => "sudo pacman -S nodejs",
-            Self::Manjaro => "sudo pacman -S nodejs",
-            Self::OpenSUSE => "sudo zypper install nodejs",
-            Self::Mint => "sudo apt install nodejs",
-            Self::PopOS => "sudo apt install nodejs",
+            Self::Debian => "sudo apt install nodejs -y",
+            Self::Ubuntu => "sudo apt install nodejs -y",
+            Self::Fedora => "sudo dnf install nodejs -y",
+            Self::Arch => "sudo pacman -S nodejs --noconfirm",
+            Self::Manjaro => "sudo pacman -S nodejs --noconfirm",
+            Self::Mint => "sudo apt install nodejs -y",
+            Self::PopOS => "sudo apt install nodejs -y",
             Self::Other => NODEJS_SCRIPT,
         }
     }
@@ -159,12 +155,13 @@ pub fn check() -> Result<(), Box<dyn Error>> {
         }
 
         install_node(&distro)?;
+        info!("Node.js was installed.");
     }
 
     // Check yarn
     if let Err(_) = which("yarn") {
         if answered_yes {
-            warn!("Installing yarn...");
+            warn!("Installing Yarn...");
         } else {
             let answer = match util::ask_yes_no(|| {
                 warn!(

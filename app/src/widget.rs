@@ -9,7 +9,7 @@ use gtk4::{
 };
 use gtk4_layer_shell::{Edge, LayerShell};
 use std::collections::HashMap;
-use traccia::{debug, error};
+use traccia::{debug, error, info};
 use webkit6::{WebContext, WebView, prelude::WebViewExt};
 
 pub struct WidgetFactory<'a> {
@@ -67,7 +67,7 @@ impl<'a> WidgetFactory<'a> {
             widgets.push(widget);
         }
 
-        debug!("Found {} widget(s)", widgets.len());
+        info!("Found {} widget(s)", widgets.len());
 
         widgets
     }
@@ -136,7 +136,7 @@ impl Widget {
 
             config.anchor.apply(&window);
 
-            window.set_monitor(Some(&monitor));
+            window.set_monitor(Some(monitor));
 
             window.set_margin(Edge::Top, config.margins.top);
             window.set_margin(Edge::Right, config.margins.right);

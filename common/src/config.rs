@@ -5,7 +5,9 @@ use serde::{
     de::{self, Visitor},
 };
 use std::{error::Error, path::PathBuf};
-use traccia::debug;
+use traccia::{debug, info};
+
+use crate::templates::Templates;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Dimension {
@@ -41,7 +43,7 @@ impl<'de> Deserialize<'de> for Dimension {
                 E: de::Error,
             {
                 if s.ends_with('%') {
-                    let percent_str = &s[..s.len() - 1];
+                    let percent_str = s.trim_end_matches('%');
                     let percent: f32 = percent_str
                         .parse()
                         .map_err(|_| E::custom(format!("Invalid percentage: {}", s)))?;
@@ -154,24 +156,19 @@ impl Anchor {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Layer {
+    #[default]
     Top,
     Bottom,
     Background,
     Overlay,
 }
 
-impl Default for Layer {
-    fn default() -> Self {
-        Layer::Top
-    }
-}
-
-impl Into<gtk4_layer_shell::Layer> for Layer {
-    fn into(self) -> gtk4_layer_shell::Layer {
-        match self {
+impl From<Layer> for gtk4_layer_shell::Layer {
+    fn from(layer: Layer) -> Self {
+        match layer {
             Layer::Top => gtk4_layer_shell::Layer::Top,
             Layer::Bottom => gtk4_layer_shell::Layer::Bottom,
             Layer::Background => gtk4_layer_shell::Layer::Background,
@@ -180,23 +177,12 @@ impl Into<gtk4_layer_shell::Layer> for Layer {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 pub struct Margins {
     pub top: i32,
     pub right: i32,
     pub bottom: i32,
     pub left: i32,
-}
-
-impl Default for Margins {
-    fn default() -> Self {
-        Margins {
-            top: 0,
-            right: 0,
-            bottom: 0,
-            left: 0,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -228,8 +214,6 @@ pub struct Config {
 }
 
 impl Config {
-    const DEFAULT: &'static str = include_str!("../../templates/config.default.json");
-
     pub fn parse() -> Result<Self, Box<dyn Error>> {
         let Some(config_path) = dirs::config_dir().map(|p| p.join("wwwidgets").join("config.json"))
         else {
@@ -242,7 +226,7 @@ impl Config {
             }
 
             debug!("Configuration file wasn't found. Creating a default one");
-            std::fs::write(&config_path, Self::DEFAULT)?;
+            std::fs::write(&config_path, Templates::DEFAULT_CONFIG)?;
         }
 
         let content = std::fs::read_to_string(&config_path)?;
@@ -250,7 +234,7 @@ impl Config {
 
         config.path = config_path;
 
-        debug!("Using configuration file at {:?}", config.path);
+        info!("Using configuration file at {:?}", config.path);
         Ok(config)
     }
 }
