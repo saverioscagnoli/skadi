@@ -1,11 +1,11 @@
 use core::fmt;
-use std::{error::Error, path::PathBuf};
-
 use gtk4_layer_shell::LayerShell;
 use serde::{
     Deserialize, Deserializer,
     de::{self, Visitor},
 };
+use std::{error::Error, path::PathBuf};
+use traccia::debug;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Dimension {
@@ -200,7 +200,7 @@ impl Default for Margins {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct WindowConfig {
+pub struct WidgetConfig {
     pub monitors: Vec<String>,
     pub label: String,
     pub width: Dimension,
@@ -224,21 +224,33 @@ pub struct Config {
     /// Path is here for ease of access outside of the struct, but is not serialized/deserialized.
     #[serde(skip)]
     pub path: PathBuf,
-    pub windows: Vec<WindowConfig>,
+    pub widgets: Vec<WidgetConfig>,
 }
 
 impl Config {
+    const DEFAULT: &'static str = include_str!("../../templates/config.default.json");
+
     pub fn parse() -> Result<Self, Box<dyn Error>> {
         let Some(config_path) = dirs::config_dir().map(|p| p.join("wwwidgets").join("config.json"))
         else {
             return Err("Could not determine config directory".into());
         };
 
+        if !config_path.exists() {
+            if let Some(parent) = config_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+
+            debug!("Configuration file wasn't found. Creating a default one");
+            std::fs::write(&config_path, Self::DEFAULT)?;
+        }
+
         let content = std::fs::read_to_string(&config_path)?;
         let mut config: Self = serde_json::from_str(&content)?;
 
         config.path = config_path;
 
+        debug!("Using configuration file at {:?}", config.path);
         Ok(config)
     }
 }

@@ -1,5 +1,6 @@
+use crate::window::Window;
 use common::{
-    config::{Config, Layer, WindowConfig},
+    config::{Config, Layer, WidgetConfig},
     util::enumerate_monitors,
 };
 use gtk4::{
@@ -8,7 +9,7 @@ use gtk4::{
 };
 use gtk4_layer_shell::{Edge, LayerShell};
 use std::collections::HashMap;
-use traccia::error;
+use traccia::{debug, error};
 use webkit6::{WebContext, WebView, prelude::WebViewExt};
 
 pub struct WidgetFactory<'a> {
@@ -24,7 +25,7 @@ impl<'a> WidgetFactory<'a> {
         let Some(display) = gdk::Display::default() else {
             error!("Failed to get default display for monitor enumeration.");
 
-            return WidgetFactory {
+            return Self {
                 app,
                 context,
                 monitors: HashMap::new(),
@@ -33,64 +34,72 @@ impl<'a> WidgetFactory<'a> {
 
         let monitors = enumerate_monitors(&display);
 
-        WidgetFactory {
+        debug!(
+            "Found {} monitor(s): {:?}",
+            monitors.len(),
+            monitors
+                .values()
+                .map(|m| m
+                    .connector()
+                    .map(|c| c.to_string())
+                    .unwrap_or(String::from("Unknown monitor")))
+                .collect::<Vec<_>>()
+        );
+
+        Self {
             app,
             context,
             monitors,
         }
     }
 
-    pub fn create_widgets(&self, config: Config) -> Vec<Widget> {
+    pub fn create_widgets(&self, config: &Config) -> Vec<Widget> {
         let mut widgets = Vec::new();
 
-        for window_config in &config.windows {
-            let mut monitors = Vec::new();
-
-            for monitor_name in &window_config.monitors {
-                if let Some(monitor) = self.monitors.get(monitor_name) {
-                    monitors.push(monitor.clone());
-                } else {
-                    error!(
-                        "Monitor '{}' not found for window '{}'.",
-                        monitor_name, window_config.label
-                    );
-                }
-            }
-
-            if monitors.is_empty() {
-                error!(
-                    "No valid monitors found for window '{}'. Skipping widget creation.",
-                    window_config.label
-                );
-
-                continue;
-            }
-
-            let widget = Widget::new(self.app, window_config.clone(), &self.context, monitors);
+        for window_config in &config.widgets {
+            let widget = Widget::new(
+                self.app,
+                window_config.clone(),
+                &self.context,
+                &self.monitors,
+            );
 
             widgets.push(widget);
         }
+
+        debug!("Found {} widget(s)", widgets.len());
 
         widgets
     }
 }
 
 pub struct Widget {
-    windows: Vec<gtk4::ApplicationWindow>,
-    config: WindowConfig,
+    pub windows: Vec<Window>,
     context: WebContext,
+    config: WidgetConfig,
 }
 
 impl Widget {
     pub fn new(
         app: &gtk4::Application,
-        config: WindowConfig,
+        config: WidgetConfig,
         context: &WebContext,
-        monitors: Vec<gdk::Monitor>,
+        monitors: &HashMap<String, gdk::Monitor>,
     ) -> Self {
+        let selected_monitors: Vec<&gdk::Monitor> =
+            if config.monitors.iter().any(|m| m.to_lowercase() == "all") {
+                monitors.values().collect()
+            } else {
+                config
+                    .monitors
+                    .iter()
+                    .filter_map(|name| monitors.get(name))
+                    .collect()
+            };
+
         let mut windows = Vec::new();
 
-        for monitor in monitors {
+        for (i, monitor) in selected_monitors.iter().enumerate() {
             let window = gtk4::ApplicationWindow::builder()
                 .application(app)
                 .title(&config.label)
@@ -145,10 +154,17 @@ impl Widget {
                 window.set_anchor(gtk4_layer_shell::Edge::Right, true);
             }
 
-            windows.push(window);
+            windows.push(Window {
+                gtk_window: window,
+                id: i as u32,
+                monitor_id: monitor
+                    .connector()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("Monitor {}", i)),
+            });
         }
 
-        Widget {
+        Self {
             windows,
             config,
             context: context.clone(),
