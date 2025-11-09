@@ -8,3 +8,4 @@ app = { path = "../app" }
 clap = { version = "4.5.51", features = ["derive"] }
 common.workspace = true
 traccia.workspace = true
+which = "8.0.0"

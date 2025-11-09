@@ -5,8 +5,18 @@ use gtk4::{
     },
     gio::prelude::ListModelExtManual,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, io::Write};
 use traccia::debug;
+
+pub fn ask_yes_no<F: Fn()>(logger: F) -> Result<bool, std::io::Error> {
+    logger();
+    std::io::stdout().flush()?;
+
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+
+    Ok(matches!(input.trim().to_lowercase().as_str(), "y" | "yes"))
+}
 
 pub fn disable_gtk_logs() {
     debug!("GTK logs disabled.");

@@ -1,6 +1,8 @@
+mod requirements;
+
 use clap::Parser;
 use common::config::Config;
-use traccia::{LogLevel, fatal};
+use traccia::{LogLevel, debug, fatal};
 
 #[derive(Debug, Clone, clap::Parser)]
 #[clap(author, version, about)]
@@ -44,6 +46,15 @@ fn main() {
     let args = Args::parse();
 
     init_logging(args.debug);
+
+    debug!("Checking requirements...");
+
+    if let Err(e) = requirements::check() {
+        fatal!("{}", e);
+        return;
+    }
+
+    debug!("All requirements are met.");
 
     let config = match Config::parse() {
         Ok(c) => c,
