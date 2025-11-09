@@ -4,7 +4,7 @@ mod requirements;
 mod vite;
 
 use clap::Parser;
-use common::{config::Config, paths};
+use common::{config::Config, paths, util};
 use traccia::{LogLevel, debug, fatal};
 
 #[derive(Debug, Clone, clap::Parser)]
@@ -50,6 +50,10 @@ async fn main() {
     let args = Args::parse();
 
     init_logging(args.debug);
+
+    if args.debug || cfg!(debug_assertions) {
+        util::set_debug(true);
+    }
 
     debug!("Checking requirements...");
 

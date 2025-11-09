@@ -1,7 +1,7 @@
 use crate::window::Window;
 use common::{
     config::{Config, Layer, WidgetConfig},
-    util::enumerate_monitors,
+    util::{self, enumerate_monitors},
 };
 use gtk4::{
     gdk::{self, RGBA, prelude::MonitorExt},
@@ -53,7 +53,7 @@ impl<'a> WidgetFactory<'a> {
         }
     }
 
-    pub fn create_widgets(&self, config: &Config) -> Vec<Widget> {
+    pub fn create_widgets(&self, config: &Config, port: u16) -> Vec<Widget> {
         let mut widgets = Vec::new();
 
         for window_config in &config.widgets {
@@ -62,6 +62,7 @@ impl<'a> WidgetFactory<'a> {
                 window_config.clone(),
                 &self.context,
                 &self.monitors,
+                port,
             );
 
             widgets.push(widget);
@@ -85,6 +86,7 @@ impl Widget {
         config: WidgetConfig,
         context: &WebContext,
         monitors: &HashMap<String, gdk::Monitor>,
+        port: u16,
     ) -> Self {
         let selected_monitors: Vec<&gdk::Monitor> =
             if config.monitors.iter().any(|m| m.to_lowercase() == "all") {
@@ -112,8 +114,23 @@ impl Widget {
                 .name(&config.label)
                 .build();
 
+            // On debug, enable web inspector
+            if util::debug() {
+                if let Some(settings) = webkit6::prelude::WebViewExt::settings(&webview) {
+                    debug!("Web inspector enabled.");
+                    settings.set_enable_developer_extras(true);
+                }
+            } else {
+                webview.connect_context_menu(|_, _, _| true);
+            }
+
             webview.set_background_color(&RGBA::TRANSPARENT);
             window.set_child(Some(&webview));
+
+            webview.load_uri(&format!(
+                "http://localhost:{}/html/{}.html",
+                port, config.label
+            ));
 
             let geometry = monitor.geometry();
 

@@ -10,8 +10,19 @@ use std::{
     error::Error,
     io::{BufRead, BufReader, Write},
     process::{Command, ExitStatus, Stdio},
+    sync::atomic::{AtomicBool, Ordering},
 };
 use traccia::{Colorize, debug};
+
+static DEBUG: AtomicBool = AtomicBool::new(false);
+
+pub fn debug() -> bool {
+    DEBUG.load(Ordering::Relaxed)
+}
+
+pub fn set_debug(v: bool) {
+    DEBUG.store(v, Ordering::Relaxed);
+}
 
 pub fn ask_yes_no<F: Fn()>(logger: F) -> Result<bool, std::io::Error> {
     logger();

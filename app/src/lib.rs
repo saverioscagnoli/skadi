@@ -16,7 +16,7 @@ pub fn setup_widgets(config: Config) -> Result<(), Box<dyn Error>> {
         util::disable_gtk_logs();
 
         let factory = WidgetFactory::new(app);
-        let widgets = factory.create_widgets(&config);
+        let widgets = factory.create_widgets(&config, config.port);
 
         for widget in widgets {
             for window in widget.windows {
