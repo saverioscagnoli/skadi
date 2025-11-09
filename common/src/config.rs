@@ -203,17 +203,24 @@ pub struct WidgetConfig {
 
     #[serde(default)]
     pub margins: Margins,
+
+    /// Path to the widget's index file (the file that is the 'parent' of all your components)
+    /// If you were coding in a normal react app, that would be your App.jsx.
+    pub index: PathBuf,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    /// Path is here for ease of access outside of the struct, but is not serialized/deserialized.
-    #[serde(skip)]
-    pub path: PathBuf,
+    #[serde(default = "Config::default_port")]
+    pub port: u16,
     pub widgets: Vec<WidgetConfig>,
 }
 
 impl Config {
+    fn default_port() -> u16 {
+        10978
+    }
+
     pub fn parse() -> Result<Self, Box<dyn Error>> {
         let Some(config_path) = dirs::config_dir().map(|p| p.join("wwwidgets").join("config.json"))
         else {
@@ -230,11 +237,9 @@ impl Config {
         }
 
         let content = std::fs::read_to_string(&config_path)?;
-        let mut config: Self = serde_json::from_str(&content)?;
+        let config: Self = serde_json::from_str(&content)?;
 
-        config.path = config_path;
-
-        info!("Using configuration file at {:?}", config.path);
+        info!("Using configuration file at {:?}", config_path);
         Ok(config)
     }
 }

@@ -33,7 +33,7 @@ pub fn config_dir() -> PathBuf {
 ///
 /// In this directory, the program, will store builds for the backend
 /// to serve on localhost, so the gtk webview can load them.
-pub fn builds_dir() -> PathBuf {
+pub fn local_dir() -> PathBuf {
     let path = match dirs::data_local_dir() {
         Some(d) => d.join("wwwidgets"),
         None => {

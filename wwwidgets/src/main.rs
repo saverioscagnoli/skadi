@@ -1,8 +1,10 @@
+#![warn(clippy::use_self)]
+
 mod requirements;
 mod vite;
 
 use clap::Parser;
-use common::config::Config;
+use common::{config::Config, paths};
 use traccia::{LogLevel, debug, fatal};
 
 #[derive(Debug, Clone, clap::Parser)]
@@ -43,7 +45,8 @@ fn init_logging(debug: bool) {
     });
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = Args::parse();
 
     init_logging(args.debug);
@@ -65,7 +68,24 @@ fn main() {
         }
     };
 
-    vite::init();
+    if let Err(e) = vite::init(&config) {
+        fatal!("Vite init failed: {}", e);
+        return;
+    }
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+
+    tokio::spawn(async move {
+        if let Err(e) = app::start_server(config.port, paths::local_dir().join("build"), tx).await {
+            fatal!("{}", e);
+            std::process::exit(1);
+        }
+    });
+
+    if let Err(e) = rx.await {
+        fatal!("Failed to start server: {}", e);
+        return;
+    }
 
     if let Err(e) = app::setup_widgets(config) {
         fatal!("Application error: {}", e);

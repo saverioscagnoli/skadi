@@ -1,3 +1,4 @@
+mod server;
 mod widget;
 mod window;
 
@@ -5,6 +6,8 @@ use crate::widget::WidgetFactory;
 use common::{config::Config, util};
 use gtk4::gio::{ApplicationFlags, prelude::*};
 use std::error::Error;
+
+pub use server::start_server;
 
 pub fn setup_widgets(config: Config) -> Result<(), Box<dyn Error>> {
     let app = gtk4::Application::new(Some("com.www.idgets"), ApplicationFlags::FLAGS_NONE);

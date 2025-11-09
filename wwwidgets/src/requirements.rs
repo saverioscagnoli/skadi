@@ -30,7 +30,7 @@ enum Distro {
 }
 
 impl Distro {
-    fn detect() -> Distro {
+    fn detect() -> Self {
         // Try to read /etc/os-release first (most modern distros)
         if let Ok(contents) = std::fs::read_to_string("/etc/os-release") {
             let lower = contents.to_lowercase();
@@ -115,7 +115,7 @@ fn install_yarn() -> Result<(), Box<dyn Error>> {
 ///
 /// 1) Node.js
 /// 2) Yarn
-/// TODO: Ask for things like gtk4, gtk-layer-shell, etc. too
+///    TODO: Ask for things like gtk4, gtk-layer-shell, etc. too
 pub fn check() -> Result<(), Box<dyn Error>> {
     let distro = Distro::detect();
 
@@ -127,7 +127,7 @@ pub fn check() -> Result<(), Box<dyn Error>> {
     let mut answered_yes = false;
 
     // Check node
-    if let Err(_) = which("node") {
+    if which("node").is_err() {
         // First ask if user wants to install nodejs first
         answered_yes = match util::ask_yes_no(|| {
             let message = if let Distro::Other = distro {
@@ -159,7 +159,7 @@ pub fn check() -> Result<(), Box<dyn Error>> {
     }
 
     // Check yarn
-    if let Err(_) = which("yarn") {
+    if which("yarn").is_err() {
         if answered_yes {
             warn!("Installing Yarn...");
         } else {
