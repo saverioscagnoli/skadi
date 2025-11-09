@@ -1,44 +1,41 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
 import { homedir } from "os";
 import fs from "fs";
-import postcss from "@tailwindcss/postcss";
 
-const LOCAL_PATH = `${homedir()}/.local/share/skadi/html`;
+const localDir = `${homedir()}/.local/share/wwwidgets`;
+const htmlDir = `${localDir}/html`;
+const buildDir = `${localDir}/build`;
+const configDir = `${homedir()}/.config/wwwidgets`;
 
-/**
- * @typedef {Object} Config
- * @property {Object[]} windows - Array of window configurations.
- * @property {string} windows[].label - The label for the window.
- */
+if (!fs.existsSync(localDir)) {
+  fs.mkdirSync(localDir, { recursive: true });
+}
 
-/**
- * @returns {string[]} - Array of HTML entry points based on the window labels in the config.
- */
-function resolveHtmlEntryPoints() {
-  let rd = fs.readdirSync(LOCAL_PATH);
-  return rd.map((f) => `html/${f}`);
+if (!fs.existsSync(configDir)) {
+  fs.mkdirSync(configDir, { recursive: true });
+}
+
+function resolveHtmlIndices() {
+  return fs.readdirSync(htmlDir).map((f) => `${htmlDir}/${f}`);
 }
 
 // https://vite.dev/config/
 export default defineConfig({
   base: "./",
-  plugins: [react(), tailwindcss()],
-  css: {
-    postcss: {
-      plugins: [postcss],
-    },
-  },
-  publicDir: `${homedir()}/.config/skadi/assets`,
+  plugins: [react({
+    
+  })],
   build: {
     rollupOptions: {
-      input: resolveHtmlEntryPoints(),
+      input: resolveHtmlIndices(),
     },
+    outDir: buildDir,
+    emptyOutDir: true,
   },
   server: {
     fs: {
-      allow: [`${homedir()}/.config/skadi`, `${homedir()}/.local/share/skadi`],
+      allow: [localDir, configDir],
     },
   },
 });
