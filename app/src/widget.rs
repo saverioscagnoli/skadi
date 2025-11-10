@@ -148,10 +148,14 @@ impl Widget {
             webview.set_background_color(&RGBA::TRANSPARENT);
             window.set_child(Some(&webview));
 
-            webview.load_uri(&format!(
-                "http://localhost:{}/html/{}.html",
-                port, config.label
-            ));
+            if util::dev() {
+                webview.load_uri(&format!("http://localhost:5173/html/{}.html", config.label));
+            } else {
+                webview.load_uri(&format!(
+                    "http://localhost:{}/html/{}.html",
+                    port, config.label
+                ));
+            }
 
             let geometry = monitor.geometry();
 

@@ -1,6 +1,6 @@
 use common::{config::Config, paths, templates::Templates, util};
-use std::{error::Error, path::Path};
-use traccia::{Style, debug, error};
+use std::{error::Error, path::Path, thread, time::Duration};
+use traccia::{Style, debug, error, info};
 
 /// The directory names inside the builds directory
 /// this is specified to avoid cleaning unrelated files,
@@ -149,6 +149,36 @@ pub fn generate_indices<P: AsRef<Path>>(config: &Config, root: P) -> Result<(), 
     Ok(())
 }
 
+fn wait_for_vite_server() -> Result<(), Box<dyn Error>> {
+    debug!("Waiting for Vite dev server to start...");
+
+    let max_attempts = 100;
+    let mut attempts = 0;
+
+    while attempts < max_attempts {
+        // Check if Vite server is responding
+        let is_ready = match ureq::get("http://localhost:5173/").call() {
+            Ok(_) => true,
+            Err(e) => {
+                match e {
+                    ureq::Error::StatusCode(_) => true, // Server responded with error status (like 404) (don't care about that)
+                    _ => false,                         // Connection error - server not ready
+                }
+            }
+        };
+
+        if is_ready {
+            info!("Vite dev server is up and running.");
+            return Ok(());
+        }
+
+        thread::sleep(Duration::from_millis(300));
+        attempts += 1;
+    }
+
+    Err("Vite dev server failed to start within 30 seconds".into())
+}
+
 pub fn init(config: &Config) -> Result<(), Box<dyn Error>> {
     let local_dir = paths::local_dir();
 
@@ -172,9 +202,23 @@ pub fn init(config: &Config) -> Result<(), Box<dyn Error>> {
         },
     )?;
 
-    util::spawn_capture(format!("cd {} && yarn build", local_dir.display()), |l| {
-        println!("{}", l.dim());
-    })?;
+    if util::dev() {
+        debug!("Development mode enabled, serving vite server instead of building");
+        thread::spawn(move || {
+            if let Err(e) =
+                util::spawn_capture(format!("cd {} && yarn dev", local_dir.display()), |l| {
+                    println!("{}", l.dim());
+                })
+            {
+                error!("Failed to start vite dev server: {}", e);
+            }
+        });
 
+        wait_for_vite_server()?;
+    } else {
+        util::spawn_capture(format!("cd {} && yarn build", local_dir.display()), |l| {
+            println!("{}", l.dim());
+        })?;
+    }
     Ok(())
 }

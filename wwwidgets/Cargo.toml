@@ -11,3 +11,4 @@ traccia.workspace = true
 which = "8.0.0"
 tokio.workspace = true
 gtk4.workspace = true
+ureq = "3.1.4"

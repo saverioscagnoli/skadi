@@ -35,11 +35,11 @@ impl Templates {
             import Index from "{}";
             import "../index.css";
 
-            createRoot(document.getElementById("root")).render(<div className="w-screen h-screen">
+            createRoot(document.getElementById("root")).render(
                 <BackendContext.Provider value={{{{ exec }}}}>
                     <Index />
                 </BackendContext.Provider>
-            </div>);
+            );
             "#,
             Self::commented_license(),
             paths::config_dir().join("use-backend.ts").display(),
