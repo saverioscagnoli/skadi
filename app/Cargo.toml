@@ -12,3 +12,4 @@ traccia.workspace = true
 axum = "0.8.6"
 tower-http = { version = "0.6.6", features = ["fs"] }
 tokio.workspace = true
+serde.workspace = true

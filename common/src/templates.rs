@@ -1,4 +1,6 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+use crate::paths;
 
 pub struct Templates;
 
@@ -7,6 +9,9 @@ impl Templates {
     pub const LICENSE: &'static str = include_str!("../../templates/LICENSE");
     pub const PACKAGE_JSON: &'static str = include_str!("../../templates/package.json");
     pub const VITE_CONFIG: &'static str = include_str!("../../templates/vite.config.js");
+    pub const UTILS_JS: &'static str = include_str!("../../templates/utils.js");
+    pub const USE_BACKEND_HOOK: &'static str = include_str!("../../templates/use-backend.ts");
+    pub const TYPES_D_TS: &'static str = include_str!("../../templates/types.d.ts");
 
     pub fn commented_license() -> String {
         Self::LICENSE
@@ -23,12 +28,21 @@ impl Templates {
             {}
 
             import {{ createRoot }} from "react-dom/client";
+            import {{ exec }} from "../utils.js";
+            import {{ BackendContext }} from "{}";
+            
 
             import Index from "{}";
+            import "../index.css";
 
-            createRoot(document.getElementById("root")).render(<div><Index /></div>);
+            createRoot(document.getElementById("root")).render(<div className="w-screen h-screen">
+                <BackendContext.Provider value={{{{ exec }}}}>
+                    <Index />
+                </BackendContext.Provider>
+            </div>);
             "#,
             Self::commented_license(),
+            paths::config_dir().join("use-backend.ts").display(),
             index.display()
         )
     }
@@ -52,6 +66,17 @@ impl Templates {
             </html>
             "#,
             label, label
+        )
+    }
+
+    pub fn css_index<P: AsRef<Path>>(config_dir: P) -> String {
+        format!(
+            r#"
+            @import "tailwindcss";
+
+            @source "{}/**/*.{{html,css,js,ts,jsx,tsx}}";
+            "#,
+            config_dir.as_ref().display()
         )
     }
 }

@@ -5,7 +5,7 @@ use traccia::{Style, debug, error};
 /// The directory names inside the builds directory
 /// this is specified to avoid cleaning unrelated files,
 /// since the builds directory is inside ~/.local/share/wwwidgets
-const DIRECTORY_NAMES: &[&str] = &["jsx", "html", "node_modules"];
+const DIRECTORY_NAMES: &[&str] = &["jsx", "html"];
 
 fn clean<P: AsRef<Path>>(path: P) -> Result<(), Box<dyn Error>> {
     if path.as_ref().exists() {
@@ -36,6 +36,40 @@ fn write_templates<P: AsRef<Path>>(path: P) -> Result<(), Box<dyn Error>> {
     }
 
     debug!("Wrote vite.config.js to {}", path.display());
+
+    if let Err(e) = std::fs::write(path.join("utils.js"), Templates::UTILS_JS) {
+        return Err(format!("Could not write utils.js to {}: {}", path.display(), e).into());
+    }
+
+    debug!("Wrote utils.js to {}", path.display());
+
+    // Write types and hooks to .config dir
+    let config_dir = paths::config_dir();
+
+    if let Err(e) = std::fs::write(
+        config_dir.join("use-backend.ts"),
+        Templates::USE_BACKEND_HOOK,
+    ) {
+        return Err(format!(
+            "Could not write use-backend.ts to {}: {}",
+            config_dir.display(),
+            e
+        )
+        .into());
+    }
+
+    debug!("Wrote use-backend.ts to {}", config_dir.display());
+
+    if let Err(e) = std::fs::write(config_dir.join("types.d.ts"), Templates::TYPES_D_TS) {
+        return Err(format!(
+            "Could not write types.d.ts to {}: {}",
+            config_dir.display(),
+            e
+        )
+        .into());
+    }
+
+    debug!("Wrote types.d.ts to {}", config_dir.display());
 
     Ok(())
 }
@@ -88,6 +122,7 @@ pub fn generate_indices<P: AsRef<Path>>(config: &Config, root: P) -> Result<(), 
                 "Could not write html index for widget {}: {}",
                 widget.label, e
             );
+
             continue;
         }
 
@@ -96,6 +131,19 @@ pub fn generate_indices<P: AsRef<Path>>(config: &Config, root: P) -> Result<(), 
             widget.label,
             html_dir.join(format!("{}.html", widget.label)).display()
         );
+
+        if let Err(e) = std::fs::write(
+            root.join("index.css"),
+            Templates::css_index(&paths::config_dir()),
+        ) {
+            error!(
+                "Could not write index.css to {}: {}",
+                root.join("index.css").display(),
+                e
+            );
+        }
+
+        debug!("Wrote index.css to {}", root.join("index.css").display());
     }
 
     Ok(())
@@ -118,14 +166,15 @@ pub fn init(config: &Config) -> Result<(), Box<dyn Error>> {
 
     // run yarn pipeline
     util::spawn_capture(
-        format!(
-            "cd {} && yarn && yarn format && yarn build",
-            local_dir.display()
-        ),
+        format!("cd {} && yarn && yarn format", local_dir.display()),
         |l| {
             println!("{}", l.dim());
         },
     )?;
+
+    util::spawn_capture(format!("cd {} && yarn build", local_dir.display()), |l| {
+        println!("{}", l.dim());
+    })?;
 
     Ok(())
 }

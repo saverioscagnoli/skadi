@@ -1,11 +1,11 @@
 use crate::window::Window;
 use common::{
-    config::{Config, Layer, WidgetConfig},
-    util::{self, enumerate_monitors},
+    config::{Anchor, Config, Layer, WidgetConfig},
+    util::{self},
 };
 use gtk4::{
     gdk::{self, RGBA, prelude::MonitorExt},
-    prelude::{GtkWindowExt, WidgetExt},
+    prelude::*,
 };
 use gtk4_layer_shell::{Edge, LayerShell};
 use std::collections::HashMap;
@@ -32,7 +32,7 @@ impl<'a> WidgetFactory<'a> {
             };
         };
 
-        let monitors = enumerate_monitors(&display);
+        let monitors = util::enumerate_monitors(&display);
 
         debug!(
             "Found {} monitor(s): {:?}",
@@ -76,7 +76,6 @@ impl<'a> WidgetFactory<'a> {
 
 pub struct Widget {
     pub windows: Vec<Window>,
-    context: WebContext,
     config: WidgetConfig,
 }
 
@@ -109,6 +108,28 @@ impl Widget {
                 .decorated(false)
                 .build();
 
+            let provider = gtk4::CssProvider::new();
+
+            provider.load_from_data(&format!(
+                r"
+                window {{
+                    background: rgba({}, {}, {}, {});
+                }}
+                ",
+                config.background[0], config.background[1], config.background[2], config.opacity,
+            ));
+
+            debug!(
+                "Injecting {:?} background color to {}",
+                config.background, config.label
+            );
+            window
+                .style_context()
+                .add_provider(&provider, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
+
+            window.init_layer_shell();
+            window.set_namespace(Some("wwwidgets"));
+
             let webview = WebView::builder()
                 .web_context(context)
                 .name(&config.label)
@@ -137,28 +158,84 @@ impl Widget {
             let width = config.width.as_pixel(geometry.width());
             let height = config.height.as_pixel(geometry.height());
 
-            window.set_width_request(width);
-            window.set_height_request(height);
-
-            window.init_layer_shell();
+            window.set_size_request(width, height);
             window.set_layer(config.layer.into());
 
             if config.exclusive {
                 window.auto_exclusive_zone_enable();
             }
 
-            if config.x != 0 || config.y != 0 {
-                todo!("Positioning windows is not yet implemented.");
-            }
-
             config.anchor.apply(&window);
+
+            let (top_margin, bottom_margin, left_margin, right_margin) = match config.anchor {
+                Anchor::Left => (
+                    config.margins.top,
+                    config.margins.bottom,
+                    config.margins.left + config.x,
+                    config.margins.right,
+                ),
+                Anchor::Right => (
+                    config.margins.top,
+                    config.margins.bottom,
+                    config.margins.left,
+                    config.margins.right + config.x,
+                ),
+                Anchor::Top => (
+                    config.margins.top + config.y,
+                    config.margins.bottom,
+                    config.margins.left,
+                    config.margins.right,
+                ),
+                Anchor::Bottom => (
+                    config.margins.top,
+                    config.margins.bottom + config.y,
+                    config.margins.left,
+                    config.margins.right,
+                ),
+                Anchor::TopLeft => (
+                    config.margins.top + config.y,
+                    config.margins.bottom,
+                    config.margins.left + config.x,
+                    config.margins.right,
+                ),
+                Anchor::TopRight => (
+                    config.margins.top + config.y,
+                    config.margins.bottom,
+                    config.margins.left,
+                    config.margins.right + config.x,
+                ),
+                Anchor::TopCenter => (
+                    config.margins.top + config.y,
+                    config.margins.bottom,
+                    config.margins.left + config.x,
+                    config.margins.right,
+                ),
+                Anchor::BottomLeft => (
+                    config.margins.top,
+                    config.margins.bottom + config.y,
+                    config.margins.left + config.x,
+                    config.margins.right,
+                ),
+                Anchor::BottomRight => (
+                    config.margins.top,
+                    config.margins.bottom + config.y,
+                    config.margins.left,
+                    config.margins.right + config.x,
+                ),
+                Anchor::BottomCenter => (
+                    config.margins.top,
+                    config.margins.bottom + config.y,
+                    config.margins.left + config.x,
+                    config.margins.right,
+                ),
+            };
 
             window.set_monitor(Some(monitor));
 
-            window.set_margin(Edge::Top, config.margins.top);
-            window.set_margin(Edge::Right, config.margins.right);
-            window.set_margin(Edge::Bottom, config.margins.bottom);
-            window.set_margin(Edge::Left, config.margins.left);
+            window.set_margin(Edge::Top, top_margin);
+            window.set_margin(Edge::Right, right_margin);
+            window.set_margin(Edge::Bottom, bottom_margin);
+            window.set_margin(Edge::Left, left_margin);
 
             if config.layer == Layer::Background {
                 // Set keyboard mode to none so it doesn't interfere with other windows
@@ -181,10 +258,6 @@ impl Widget {
             });
         }
 
-        Self {
-            windows,
-            config,
-            context: context.clone(),
-        }
+        Self { windows, config }
     }
 }
