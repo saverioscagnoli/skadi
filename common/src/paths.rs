@@ -9,7 +9,7 @@ static USER: LazyLock<String> = LazyLock::new(|| match std::env::var("USER") {
     }
 });
 
-/// Returns /home/<user>/.config/wwidgets, creating it if necessary.
+/// Returns /home/$USER/.config/wwwidgets, creating it if necessary.
 ///
 /// In this directory, the user will store configuration files.
 /// The program will crete a default config file if there is none.

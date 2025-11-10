@@ -92,7 +92,6 @@ pub enum Anchor {
     Left,
     Right,
     Bottom,
-    Center,
 
     #[serde(alias = "top-left", alias = "top left")]
     TopLeft,
@@ -120,12 +119,6 @@ impl Anchor {
             Anchor::Left => window.set_anchor(gtk4_layer_shell::Edge::Left, true),
             Anchor::Right => window.set_anchor(gtk4_layer_shell::Edge::Right, true),
             Anchor::Bottom => window.set_anchor(gtk4_layer_shell::Edge::Bottom, true),
-            Anchor::Center => {
-                window.set_anchor(gtk4_layer_shell::Edge::Top, false);
-                window.set_anchor(gtk4_layer_shell::Edge::Left, false);
-                window.set_anchor(gtk4_layer_shell::Edge::Right, false);
-                window.set_anchor(gtk4_layer_shell::Edge::Bottom, false);
-            }
             Anchor::TopLeft => {
                 window.set_anchor(gtk4_layer_shell::Edge::Top, true);
                 window.set_anchor(gtk4_layer_shell::Edge::Left, true);
@@ -191,8 +184,8 @@ pub struct WidgetConfig {
     pub label: String,
     pub width: Dimension,
     pub height: Dimension,
-    pub x: i64,
-    pub y: i64,
+    pub x: i32,
+    pub y: i32,
     pub anchor: Anchor,
 
     #[serde(default)]
@@ -207,6 +200,12 @@ pub struct WidgetConfig {
     /// Path to the widget's index file (the file that is the 'parent' of all your components)
     /// If you were coding in a normal react app, that would be your App.jsx.
     pub index: PathBuf,
+
+    #[serde(default)]
+    pub background: [u8; 3],
+
+    #[serde(default = "Config::default_opacity")]
+    pub opacity: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -219,6 +218,10 @@ pub struct Config {
 impl Config {
     fn default_port() -> u16 {
         10978
+    }
+
+    fn default_opacity() -> f64 {
+        1.0
     }
 
     pub fn parse() -> Result<Self, Box<dyn Error>> {

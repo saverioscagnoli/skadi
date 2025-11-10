@@ -1,11 +1,11 @@
 use common::{config::Config, paths, templates::Templates, util};
-use std::{error::Error, path::Path};
-use traccia::{Style, debug, error};
+use std::{error::Error, path::Path, thread, time::Duration};
+use traccia::{Style, debug, error, info};
 
 /// The directory names inside the builds directory
 /// this is specified to avoid cleaning unrelated files,
 /// since the builds directory is inside ~/.local/share/wwwidgets
-const DIRECTORY_NAMES: &[&str] = &["jsx", "html", "node_modules"];
+const DIRECTORY_NAMES: &[&str] = &["jsx", "html"];
 
 fn clean<P: AsRef<Path>>(path: P) -> Result<(), Box<dyn Error>> {
     if path.as_ref().exists() {
@@ -36,6 +36,40 @@ fn write_templates<P: AsRef<Path>>(path: P) -> Result<(), Box<dyn Error>> {
     }
 
     debug!("Wrote vite.config.js to {}", path.display());
+
+    if let Err(e) = std::fs::write(path.join("utils.js"), Templates::UTILS_JS) {
+        return Err(format!("Could not write utils.js to {}: {}", path.display(), e).into());
+    }
+
+    debug!("Wrote utils.js to {}", path.display());
+
+    // Write types and hooks to .config dir
+    let config_dir = paths::config_dir();
+
+    if let Err(e) = std::fs::write(
+        config_dir.join("use-backend.ts"),
+        Templates::USE_BACKEND_HOOK,
+    ) {
+        return Err(format!(
+            "Could not write use-backend.ts to {}: {}",
+            config_dir.display(),
+            e
+        )
+        .into());
+    }
+
+    debug!("Wrote use-backend.ts to {}", config_dir.display());
+
+    if let Err(e) = std::fs::write(config_dir.join("types.d.ts"), Templates::TYPES_D_TS) {
+        return Err(format!(
+            "Could not write types.d.ts to {}: {}",
+            config_dir.display(),
+            e
+        )
+        .into());
+    }
+
+    debug!("Wrote types.d.ts to {}", config_dir.display());
 
     Ok(())
 }
@@ -88,6 +122,7 @@ pub fn generate_indices<P: AsRef<Path>>(config: &Config, root: P) -> Result<(), 
                 "Could not write html index for widget {}: {}",
                 widget.label, e
             );
+
             continue;
         }
 
@@ -96,9 +131,52 @@ pub fn generate_indices<P: AsRef<Path>>(config: &Config, root: P) -> Result<(), 
             widget.label,
             html_dir.join(format!("{}.html", widget.label)).display()
         );
+
+        if let Err(e) = std::fs::write(
+            root.join("index.css"),
+            Templates::css_index(&paths::config_dir()),
+        ) {
+            error!(
+                "Could not write index.css to {}: {}",
+                root.join("index.css").display(),
+                e
+            );
+        }
+
+        debug!("Wrote index.css to {}", root.join("index.css").display());
     }
 
     Ok(())
+}
+
+fn wait_for_vite_server() -> Result<(), Box<dyn Error>> {
+    debug!("Waiting for Vite dev server to start...");
+
+    let max_attempts = 100;
+    let mut attempts = 0;
+
+    while attempts < max_attempts {
+        // Check if Vite server is responding
+        let is_ready = match ureq::get("http://localhost:5173/").call() {
+            Ok(_) => true,
+            Err(e) => {
+                match e {
+                    ureq::Error::StatusCode(_) => true, // Server responded with error status (like 404) (don't care about that)
+                    _ => false,                         // Connection error - server not ready
+                }
+            }
+        };
+
+        if is_ready {
+            info!("Vite dev server is up and running.");
+            return Ok(());
+        }
+
+        thread::sleep(Duration::from_millis(300));
+        attempts += 1;
+    }
+
+    Err("Vite dev server failed to start within 30 seconds".into())
 }
 
 pub fn init(config: &Config) -> Result<(), Box<dyn Error>> {
@@ -118,14 +196,29 @@ pub fn init(config: &Config) -> Result<(), Box<dyn Error>> {
 
     // run yarn pipeline
     util::spawn_capture(
-        format!(
-            "cd {} && yarn && yarn format && yarn build",
-            local_dir.display()
-        ),
+        format!("cd {} && yarn && yarn format", local_dir.display()),
         |l| {
             println!("{}", l.dim());
         },
     )?;
 
+    if util::dev() {
+        debug!("Development mode enabled, serving vite server instead of building");
+        thread::spawn(move || {
+            if let Err(e) =
+                util::spawn_capture(format!("cd {} && yarn dev", local_dir.display()), |l| {
+                    println!("{}", l.dim());
+                })
+            {
+                error!("Failed to start vite dev server: {}", e);
+            }
+        });
+
+        wait_for_vite_server()?;
+    } else {
+        util::spawn_capture(format!("cd {} && yarn build", local_dir.display()), |l| {
+            println!("{}", l.dim());
+        })?;
+    }
     Ok(())
 }

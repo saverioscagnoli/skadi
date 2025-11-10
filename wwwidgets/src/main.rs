@@ -3,6 +3,8 @@
 mod requirements;
 mod vite;
 
+use std::{thread, time::Duration};
+
 use clap::Parser;
 use common::{config::Config, paths, util};
 use traccia::{LogLevel, debug, fatal};
@@ -11,12 +13,14 @@ use traccia::{LogLevel, debug, fatal};
 #[clap(author, version, about)]
 struct Args {
     #[arg(
-        short,
         long,
         help = "Enable debug logging and webview inspector",
         default_value_t = false
     )]
     debug: bool,
+
+    #[arg(long, help = "Run in development mode", default_value_t = false)]
+    dev: bool,
 }
 
 struct LogFormatter;
@@ -31,8 +35,8 @@ impl traccia::Formatter for LogFormatter {
     }
 }
 
-fn init_logging(debug: bool) {
-    let level = if debug || cfg!(debug_assertions) {
+fn init_logging() {
+    let level = if util::debug() || cfg!(debug_assertions) {
         LogLevel::Debug
     } else {
         LogLevel::Info
@@ -49,11 +53,16 @@ fn init_logging(debug: bool) {
 async fn main() {
     let args = Args::parse();
 
-    init_logging(args.debug);
-
     if args.debug || cfg!(debug_assertions) {
         util::set_debug(true);
     }
+
+    if args.dev {
+        util::set_debug(true);
+        util::set_dev(true);
+    }
+
+    init_logging();
 
     debug!("Checking requirements...");
 

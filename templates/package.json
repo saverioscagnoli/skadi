@@ -8,7 +8,10 @@
   },
   "dependencies": {
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "tailwindcss": "^4.1.17",
+    "@tailwindcss/vite": "^4.1.17",
+    "@tailwindcss/postcss": "^4.1.17"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.4",
