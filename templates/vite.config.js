@@ -63,6 +63,13 @@ export default defineConfig({
       Pragma: "no-cache",
       Expires: "0",
     },
+    proxy: {
+      "/backend": {
+        target: "http://localhost:10978",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/backend/, ""),
+      },
+    },
   },
   optimizeDeps: {
     include: ["react", "react-dom"],

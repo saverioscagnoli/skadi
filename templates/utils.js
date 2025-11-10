@@ -5,7 +5,7 @@
  */
 async function exec(command, args) {
   try {
-    const response = await fetch("/exec", {  
+    const response = await fetch("/backend/exec", {  
       method: "POST",
       headers: {
         "Content-Type": "application/json"

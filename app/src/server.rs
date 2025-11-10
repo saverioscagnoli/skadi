@@ -5,6 +5,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
+use common::util;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::path::PathBuf;
@@ -20,10 +21,13 @@ pub async fn start_server(
     root_dir: PathBuf,
     ready_tx: oneshot::Sender<()>,
 ) -> Result<(), Box<dyn Error>> {
-    let app = Router::new()
+    let mut app = Router::new()
         .route("/healthcheck", get(healthcheck))
-        .route("/exec", post(exec))
-        .fallback_service(ServeDir::new(&root_dir));
+        .route("/exec", post(exec));
+
+    if !util::dev() {
+        app = app.fallback_service(ServeDir::new(&root_dir));
+    }
 
     debug!("Serving directory: {}", root_dir.display());
 

@@ -86,22 +86,18 @@ async fn main() {
         return;
     }
 
-    if !util::dev() {
-        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
 
-        tokio::spawn(async move {
-            if let Err(e) =
-                app::start_server(config.port, paths::local_dir().join("build"), tx).await
-            {
-                fatal!("{}", e);
-                std::process::exit(1);
-            }
-        });
-
-        if let Err(e) = rx.await {
-            fatal!("Failed to start server: {}", e);
-            return;
+    tokio::spawn(async move {
+        if let Err(e) = app::start_server(config.port, paths::local_dir().join("build"), tx).await {
+            fatal!("{}", e);
+            std::process::exit(1);
         }
+    });
+
+    if let Err(e) = rx.await {
+        fatal!("Failed to start server: {}", e);
+        return;
     }
 
     if let Err(e) = app::setup_widgets(config) {
