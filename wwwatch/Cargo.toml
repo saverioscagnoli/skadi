@@ -10,3 +10,4 @@ serde.workspace = true
 serde_json.workspace = true
 clap.workspace = true
 tokio.workspace = true
+indexmap = { version = "2.6", features = ["serde"] }
