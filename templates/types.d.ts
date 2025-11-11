@@ -6,3 +6,4 @@ type ExecMessage = {
 }
 
 type ExecFunction = (command: string, args?: string[]) => Promise<ExecMessage>;
+type ListenFunction = (script: string, callback: (data: string) => void) => void;

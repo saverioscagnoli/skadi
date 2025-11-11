@@ -28,7 +28,7 @@ impl Templates {
             {}
 
             import {{ createRoot }} from "react-dom/client";
-            import {{ exec }} from "../utils.js";
+            import {{ exec, useListen }} from "../utils.js";
             import {{ BackendContext }} from "{}";
             
 
@@ -36,7 +36,7 @@ impl Templates {
             import "../index.css";
 
             createRoot(document.getElementById("root")).render(
-                <BackendContext.Provider value={{{{ exec }}}}>
+                <BackendContext.Provider value={{{{ exec, useListen }}}}>
                     <Index />
                 </BackendContext.Provider>
             );

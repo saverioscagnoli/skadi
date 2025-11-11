@@ -6,10 +6,11 @@ edition = "2024"
 [dependencies]
 gtk4.workspace = true
 gtk4-layer-shell.workspace = true
-webkit6 = "0.5.0"
 common.workspace = true
 traccia.workspace = true
 axum = "0.8.6"
-tower-http = { version = "0.6.6", features = ["fs"] }
+tower-http = { version = "0.6.6", features = ["cors", "fs"] }
 tokio.workspace = true
 serde.workspace = true
+webkit6.workspace = true
+serde_json.workspace = true 
