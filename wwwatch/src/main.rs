@@ -1,3 +1,4 @@
+mod info;
 mod payloads;
 
 use crate::payloads::WorkspacePayload;
@@ -72,6 +73,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut connection = Connection::new()?;
     let mut current_workspace = String::new();
     let mut workspace_cache = IndexSet::new();
+
+    info::query_info(args.cpu, args.mem, args.disk, args.network, args.interval);
 
     if args.workspaces {
         event_list.push(EventType::Workspace);
