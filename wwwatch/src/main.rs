@@ -3,8 +3,8 @@ mod payloads;
 
 use crate::payloads::WorkspacePayload;
 use clap::Parser;
-use indexmap::IndexSet;
 use serde::Serialize;
+use std::collections::HashSet;
 use std::error::Error;
 use swayipc::{Connection, Event, EventType, WorkspaceChange};
 
@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut event_list = Vec::new();
     let mut connection = Connection::new()?;
     let mut current_workspace = String::new();
-    let mut workspace_cache = IndexSet::new();
+    let mut workspace_cache = HashSet::new();
 
     info::query_info(args.cpu, args.mem, args.disk, args.network, args.interval);
 
@@ -86,13 +86,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             if ws.focused {
                 current_workspace = ws.name.clone();
             }
-            workspace_cache.insert(ws.name);
+            let num = ws.num;
+            workspace_cache.insert((num, ws.name));
         }
+
+        // Sort workspaces by num
+        let mut sorted_workspaces: Vec<_> = workspace_cache.iter().cloned().collect();
+        sorted_workspaces.sort_by_key(|(num, _)| *num);
 
         let payload = WorkspacePayload {
             op: Op::Workspaces,
             current: &current_workspace,
-            total: &workspace_cache,
+            total: &sorted_workspaces,
         };
 
         println!("{}", serde_json::to_string(&payload).unwrap());
@@ -109,14 +114,19 @@ fn main() -> Result<(), Box<dyn Error>> {
                     if let Some(current_ws) = ws_event.current
                         && let Some(name) = current_ws.name
                     {
-                        workspace_cache.insert(name.clone());
+                        let num = current_ws.num.unwrap_or(-1);
+                        workspace_cache.insert((num, name.clone()));
                         current_workspace = name;
                     }
+
+                    // Sort workspaces by num
+                    let mut sorted_workspaces: Vec<_> = workspace_cache.iter().cloned().collect();
+                    sorted_workspaces.sort_by_key(|(num, _)| *num);
 
                     let payload = WorkspacePayload {
                         op: Op::Workspaces,
                         current: &current_workspace,
-                        total: &workspace_cache,
+                        total: &sorted_workspaces,
                     };
 
                     println!("{}", serde_json::to_string(&payload)?);
@@ -126,13 +136,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                     if let Some(current_ws) = ws_event.current
                         && let Some(name) = current_ws.name
                     {
-                        workspace_cache.swap_remove(&name);
+                        let num = current_ws.num.unwrap_or(-1);
+                        workspace_cache.remove(&(num, name));
                     }
+
+                    // Sort workspaces by num
+                    let mut sorted_workspaces: Vec<_> = workspace_cache.iter().cloned().collect();
+                    sorted_workspaces.sort_by_key(|(num, _)| *num);
 
                     let payload = WorkspacePayload {
                         op: Op::Workspaces,
                         current: &current_workspace,
-                        total: &workspace_cache,
+                        total: &sorted_workspaces,
                     };
 
                     println!("{}", serde_json::to_string(&payload).unwrap());

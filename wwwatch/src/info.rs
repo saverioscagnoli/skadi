@@ -1,65 +1,12 @@
-use serde::Serialize;
+use crate::payloads::{
+    CoreInfo, CpuPayload, DiskInfo, DiskPayload, InfoPayload, MemPayload, NetworkInterface,
+    NetworkPayload,
+};
 use std::{thread, time::Duration};
 use sysinfo::{
-    Components, CpuRefreshKind, DiskRefreshKind, Disks, MemoryRefreshKind, RefreshKind, System,
+    Components, CpuRefreshKind, DiskRefreshKind, Disks, MemoryRefreshKind, NetworkData, Networks,
+    RefreshKind, System,
 };
-
-#[derive(Debug, Clone, Serialize)]
-struct CoreInfo {
-    usage: f32,
-    freq: f32,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct CpuPayload {
-    usage: f32,
-    temp: f32,
-    freq: f32,
-    cores: Vec<CoreInfo>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct MemPayload {
-    total: f32,
-    used: f32,
-    free: f32,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct DiskInfo {
-    total: u64,
-    used: u64,
-    free: u64,
-    read: u64,
-    write: u64,
-    name: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct DiskPayload {
-    disks: Vec<DiskInfo>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct NetworkInterface {
-    name: String,
-    download: u64,
-    upload: u64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct NetworkPayload {
-    download: u64,
-    upload: u64,
-}
-
-#[derive(Debug, Default, Clone, Serialize)]
-struct InfoPayload {
-    cpu: Option<CpuPayload>,
-    mem: Option<MemPayload>,
-    disks: Option<DiskPayload>,
-    network: Option<NetworkPayload>,
-}
 
 fn get_cpu_temp() -> Option<f32> {
     // Iterate through all hwmon devices
@@ -104,6 +51,13 @@ fn get_cpu_temp() -> Option<f32> {
     None
 }
 
+fn get_primary_network(networks: &Networks) -> Option<(&String, &NetworkData)> {
+    networks
+        .iter()
+        .filter(|(name, _)| !name.starts_with("lo"))
+        .max_by_key(|(_, data)| data.received() + data.transmitted())
+}
+
 pub fn query_info(cpu: bool, mem: bool, disk: bool, network: bool, interval_ms: u64) {
     if !cpu && !mem && !disk && !network {
         return;
@@ -128,6 +82,7 @@ pub fn query_info(cpu: bool, mem: bool, disk: bool, network: bool, interval_ms: 
     let mut system = System::new_with_specifics(refresh_kind);
     let mut components = Components::new_with_refreshed_list();
     let disks = Disks::new_with_refreshed_list_specifics(disk_refresh_kind);
+    let mut networks = Networks::new_with_refreshed_list();
 
     thread::spawn(move || {
         // Initial refresh to establish baseline for CPU usage calculations
@@ -137,6 +92,7 @@ pub fn query_info(cpu: bool, mem: bool, disk: bool, network: bool, interval_ms: 
         loop {
             system.refresh_specifics(refresh_kind);
             components.refresh(false);
+            networks.refresh(false);
 
             if cpu {
                 let mut avg_freq = 0.0;
@@ -168,9 +124,9 @@ pub fn query_info(cpu: bool, mem: bool, disk: bool, network: bool, interval_ms: 
 
             if mem {
                 let payload = MemPayload {
-                    total: system.total_memory() as f32 / 1000.0 / 1000.0,
-                    used: system.used_memory() as f32 / 1000.0 / 1000.0,
-                    free: system.available_memory() as f32 / 1000.0 / 1000.0,
+                    total: system.total_memory(),
+                    used: system.used_memory(),
+                    free: system.available_memory(),
                 };
 
                 info_payload.mem = Some(payload);
@@ -200,6 +156,34 @@ pub fn query_info(cpu: bool, mem: bool, disk: bool, network: bool, interval_ms: 
                 };
 
                 info_payload.disks = Some(payload);
+            }
+
+            if network {
+                let mut networks_payload = Vec::new();
+                let mut total_bytes_download = 0;
+                let mut total_bytes_upload = 0;
+
+                let primary_interface = get_primary_network(&networks);
+
+                for (name, data) in &networks {
+                    total_bytes_download += data.received();
+                    total_bytes_upload += data.transmitted();
+
+                    networks_payload.push(NetworkInterface {
+                        name: name.to_string(),
+                        download: data.received(),
+                        upload: data.transmitted(),
+                        primary: primary_interface.map(|(n, _)| n == name).unwrap_or(false),
+                    });
+                }
+
+                let payload = NetworkPayload {
+                    download: total_bytes_download,
+                    upload: total_bytes_upload,
+                    interfaces: networks_payload,
+                };
+
+                info_payload.network = Some(payload);
             }
 
             println!("{}", serde_json::to_string(&info_payload).unwrap());

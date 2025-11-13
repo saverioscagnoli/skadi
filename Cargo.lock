@@ -946,8 +946,6 @@ checksum = "6717a8d2a5a929a1a2eb43a12812498ed141a0bcfb7e8f7844fbdbe4303bba9f"
 dependencies = [
  "equivalent",
  "hashbrown",
- "serde",
- "serde_core",
 ]
 
 [[package]]
@@ -2288,7 +2286,6 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "hyprland",
- "indexmap",
  "serde",
  "serde_json",
  "swayipc",
