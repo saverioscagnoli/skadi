@@ -1,6 +1,6 @@
 use axum::{
     Router,
-    extract::Json,
+    extract::{Json, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -10,23 +10,48 @@ use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::path::PathBuf;
 use std::process::Stdio;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::TcpListener;
-use tokio::process::Command;
 use tokio::sync::oneshot;
-use tower_http::services::ServeDir;
-use traccia::{debug, error, info};
+use tokio::{process::Command, sync::mpsc::UnboundedSender};
+use tower_http::{
+    cors::{self, CorsLayer},
+    services::ServeDir,
+};
+use traccia::{debug, error, fatal, info};
+
+#[derive(Debug)]
+pub struct EventRequest {
+    pub widget_label: String,
+    pub event_name: String,
+    pub payload: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ListenBody {
+    pub script: String,
+    pub widget_label: String,
+}
 
 pub async fn start_server(
     port: u16,
     root_dir: PathBuf,
     ready_tx: oneshot::Sender<()>,
+    event_tx: UnboundedSender<EventRequest>,
 ) -> Result<(), Box<dyn Error>> {
+    let cors = CorsLayer::new().allow_origin(cors::Any);
+
     let mut app = Router::new()
         .route("/healthcheck", get(healthcheck))
-        .route("/exec", post(exec));
+        .route("/exec", post(exec))
+        .route("/listen", post(listen))
+        .layer(cors)
+        .with_state(event_tx);
 
     if !util::dev() {
-        app = app.fallback_service(ServeDir::new(&root_dir));
+        app = Router::new()
+            .nest("/backend", app)
+            .fallback_service(ServeDir::new(&root_dir));
     }
 
     debug!("Serving directory: {}", root_dir.display());
@@ -113,4 +138,54 @@ async fn exec(Json(payload): Json<ExecRequest>) -> impl IntoResponse {
             Json(response)
         }
     }
+}
+
+pub async fn listen(
+    State(event_tx): State<UnboundedSender<EventRequest>>,
+    Json(body): Json<ListenBody>,
+) {
+    debug!(
+        "Setting up listener for widget: {} with script: {}",
+        body.widget_label, body.script
+    );
+
+    let widget_label = body.widget_label.clone();
+    let event_name = body.script.clone();
+
+    tokio::spawn(async move {
+        let mut child = match Command::new("bash")
+            .arg("-c")
+            .arg(&body.script)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => child,
+            Err(e) => {
+                error!("Failed to spawn command: {}", e);
+                return;
+            }
+        };
+
+        let stdout = child.stdout.take().expect("Failed to capture stdout");
+        let mut reader = BufReader::new(stdout).lines();
+
+        while let Ok(Some(line)) = reader.next_line().await {
+            let event = EventRequest {
+                widget_label: widget_label.clone(),
+                event_name: event_name.clone(), // Clone here
+                payload: line,
+            };
+
+            if event_tx.send(event).is_err() {
+                error!("Failed to send event, receiver dropped");
+                break;
+            }
+        }
+
+        match child.wait().await {
+            Ok(status) => debug!("Command exited with: {}", status),
+            Err(e) => error!("Error waiting for command: {}", e),
+        }
+    });
 }

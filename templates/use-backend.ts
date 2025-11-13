@@ -2,6 +2,7 @@ import { createContext, useContext } from "react";
 
 type BackendContextType = {
   exec: ExecFunction;
+  useListen: ListenFunction;
 };
 
 const BackendContext = createContext<BackendContextType | null>(null);

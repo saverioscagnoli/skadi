@@ -3,8 +3,6 @@
 mod requirements;
 mod vite;
 
-use std::{thread, time::Duration};
-
 use clap::Parser;
 use common::{config::Config, paths, util};
 use traccia::{LogLevel, debug, fatal};
@@ -86,21 +84,29 @@ async fn main() {
         return;
     }
 
-    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
+    let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
 
     tokio::spawn(async move {
-        if let Err(e) = app::start_server(config.port, paths::local_dir().join("build"), tx).await {
+        if let Err(e) = app::start_server(
+            config.port,
+            paths::local_dir().join("build"),
+            ready_tx,
+            event_tx,
+        )
+        .await
+        {
             fatal!("{}", e);
             std::process::exit(1);
         }
     });
 
-    if let Err(e) = rx.await {
+    if let Err(e) = ready_rx.await {
         fatal!("Failed to start server: {}", e);
         return;
     }
 
-    if let Err(e) = app::setup_widgets(config) {
+    if let Err(e) = app::setup_widgets(config, event_rx) {
         fatal!("Application error: {}", e);
     }
 }

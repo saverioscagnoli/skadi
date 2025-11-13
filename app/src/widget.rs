@@ -76,7 +76,7 @@ impl<'a> WidgetFactory<'a> {
 
 pub struct Widget {
     pub windows: Vec<Window>,
-    config: WidgetConfig,
+    pub config: WidgetConfig,
 }
 
 impl Widget {
@@ -254,6 +254,7 @@ impl Widget {
 
             windows.push(Window {
                 gtk_window: window,
+                webview,
                 id: i as u32,
                 monitor_id: monitor
                     .connector()
