@@ -7,18 +7,20 @@ use axum::{
 };
 use common::util;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::error::Error;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::TcpListener;
-use tokio::sync::oneshot;
+use tokio::sync::{RwLock, oneshot};
 use tokio::{process::Command, sync::mpsc::UnboundedSender};
 use tower_http::{
     cors::{self, CorsLayer},
     services::ServeDir,
 };
-use traccia::{debug, error, fatal, info};
+use traccia::{debug, error, info, warn};
 
 #[derive(Debug)]
 pub struct EventRequest {
@@ -33,6 +35,12 @@ pub struct ListenBody {
     pub widget_label: String,
 }
 
+#[derive(Clone)]
+pub struct AppState {
+    pub event_tx: UnboundedSender<EventRequest>,
+    pub active_listeners: Arc<RwLock<HashSet<(String, String)>>>,
+}
+
 pub async fn start_server(
     port: u16,
     root_dir: PathBuf,
@@ -41,12 +49,17 @@ pub async fn start_server(
 ) -> Result<(), Box<dyn Error>> {
     let cors = CorsLayer::new().allow_origin(cors::Any);
 
+    let app_state = AppState {
+        event_tx,
+        active_listeners: Arc::new(RwLock::new(HashSet::new())),
+    };
+
     let mut app = Router::new()
         .route("/healthcheck", get(healthcheck))
         .route("/exec", post(exec))
         .route("/listen", post(listen))
         .layer(cors)
-        .with_state(event_tx);
+        .with_state(app_state);
 
     if !util::dev() {
         app = Router::new()
@@ -140,17 +153,33 @@ async fn exec(Json(payload): Json<ExecRequest>) -> impl IntoResponse {
     }
 }
 
-pub async fn listen(
-    State(event_tx): State<UnboundedSender<EventRequest>>,
-    Json(body): Json<ListenBody>,
-) {
+pub async fn listen(State(app_state): State<AppState>, Json(body): Json<ListenBody>) {
     debug!(
         "Setting up listener for widget: {} with script: {}",
         body.widget_label, body.script
     );
 
+    let listener_key = (body.widget_label.clone(), body.script.clone());
+
+    // Check if this listener is already active
+    {
+        let mut listeners = app_state.active_listeners.write().await;
+
+        if listeners.contains(&listener_key) {
+            warn!(
+                "Ignoring duplicate listener request for widget: {} with script: {} (This is normal if you have multiple instances of the widget)",
+                body.widget_label, body.script
+            );
+            return;
+        }
+
+        listeners.insert(listener_key.clone());
+    }
+
     let widget_label = body.widget_label.clone();
     let event_name = body.script.clone();
+    let event_tx = app_state.event_tx.clone();
+    let active_listeners = app_state.active_listeners.clone();
 
     tokio::spawn(async move {
         let mut child = match Command::new("bash")
@@ -173,7 +202,7 @@ pub async fn listen(
         while let Ok(Some(line)) = reader.next_line().await {
             let event = EventRequest {
                 widget_label: widget_label.clone(),
-                event_name: event_name.clone(), // Clone here
+                event_name: event_name.clone(),
                 payload: line,
             };
 
@@ -187,5 +216,14 @@ pub async fn listen(
             Ok(status) => debug!("Command exited with: {}", status),
             Err(e) => error!("Error waiting for command: {}", e),
         }
+
+        // Remove this listener from active set when it finishes
+        let mut listeners = active_listeners.write().await;
+        listeners.remove(&listener_key);
+
+        debug!(
+            "Listener removed for widget: {} with script: {}",
+            listener_key.0, listener_key.1
+        );
     });
 }
