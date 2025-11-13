@@ -37,8 +37,8 @@ fn write_templates<P: AsRef<Path>>(path: P) -> Result<(), Box<dyn Error>> {
 
     debug!("Wrote vite.config.js to {}", path.display());
 
-    if let Err(e) = std::fs::write(path.join("utils.js"), Templates::UTILS_JS) {
-        return Err(format!("Could not write utils.js to {}: {}", path.display(), e).into());
+    if let Err(e) = std::fs::write(path.join("backend.ts"), Templates::BACKEND_TS) {
+        return Err(format!("Could not write backend.ts to {}: {}", path.display(), e).into());
     }
 
     debug!("Wrote utils.js to {}", path.display());
@@ -59,17 +59,6 @@ fn write_templates<P: AsRef<Path>>(path: P) -> Result<(), Box<dyn Error>> {
     }
 
     debug!("Wrote use-backend.ts to {}", config_dir.display());
-
-    if let Err(e) = std::fs::write(config_dir.join("types.d.ts"), Templates::TYPES_D_TS) {
-        return Err(format!(
-            "Could not write types.d.ts to {}: {}",
-            config_dir.display(),
-            e
-        )
-        .into());
-    }
-
-    debug!("Wrote types.d.ts to {}", config_dir.display());
 
     Ok(())
 }

@@ -9,9 +9,8 @@ impl Templates {
     pub const LICENSE: &'static str = include_str!("../../templates/LICENSE");
     pub const PACKAGE_JSON: &'static str = include_str!("../../templates/package.json");
     pub const VITE_CONFIG: &'static str = include_str!("../../templates/vite.config.js");
-    pub const UTILS_JS: &'static str = include_str!("../../templates/utils.js");
+    pub const BACKEND_TS: &'static str = include_str!("../../templates/backend.ts");
     pub const USE_BACKEND_HOOK: &'static str = include_str!("../../templates/use-backend.ts");
-    pub const TYPES_D_TS: &'static str = include_str!("../../templates/types.d.ts");
 
     pub fn commented_license() -> String {
         Self::LICENSE
@@ -28,15 +27,14 @@ impl Templates {
             {}
 
             import {{ createRoot }} from "react-dom/client";
-            import {{ exec, useListen }} from "../utils.js";
+            import * as backend from "../backend.ts";
             import {{ BackendContext }} from "{}";
-            
 
             import Index from "{}";
             import "../index.css";
 
             createRoot(document.getElementById("root")).render(
-                <BackendContext.Provider value={{{{ exec, useListen }}}}>
+                <BackendContext.Provider value={{backend}}>
                     <Index />
                 </BackendContext.Provider>
             );
@@ -47,6 +45,8 @@ impl Templates {
         )
     }
 
+    /// Sets the widget label as the title of the document,
+    /// so that it can be used for backend communication, to identify the widget.
     pub fn html_index<T: AsRef<str>>(label: T) -> String {
         let label = label.as_ref();
 

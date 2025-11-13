@@ -1,8 +1,30 @@
 import { createContext, useContext } from "react";
 
+type BackendMessage = {
+  success: boolean;
+  stdout: string;
+  stderr: string;
+};
+
+type ExecFunction = (
+  command: string,
+  args: string[],
+) => Promise<BackendMessage>;
+
+type UseListenHook = <T = string>(
+  script: string,
+  args: string[],
+  callback: (data: T) => void,
+) => void;
+
+type WindowHandle = {
+  show: () => Promise<void>;
+};
+
 type BackendContextType = {
   exec: ExecFunction;
-  useListen: ListenFunction;
+  useListen: UseListenHook;
+  window: WindowHandle;
 };
 
 const BackendContext = createContext<BackendContextType | null>(null);
@@ -18,3 +40,10 @@ function useBackend() {
 }
 
 export { BackendContext, useBackend };
+export type {
+  BackendMessage,
+  ExecFunction,
+  UseListenHook,
+  WindowHandle,
+  BackendContextType,
+};

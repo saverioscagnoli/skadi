@@ -2,21 +2,23 @@ mod server;
 mod widget;
 mod window;
 
-use crate::{server::EventRequest, widget::WidgetFactory};
+use crate::{server::EventRequest, widget::WidgetFactory, window::WindowActionRequest};
 use common::{config::Config, util};
 use gtk4::gio::{ApplicationFlags, prelude::*};
-use std::{error::Error, rc::Rc};
-use tokio::sync::mpsc::UnboundedReceiver;
+use std::{cell::RefCell, error::Error, rc::Rc};
+use tokio::sync::{mpsc::UnboundedReceiver, watch::error::RecvError};
 use traccia::{debug, warn};
 
 pub use server::start_server;
 
 pub fn setup_widgets(
     config: Config,
-    event_recv: UnboundedReceiver<EventRequest>,
+    event_rx: UnboundedReceiver<EventRequest>,
+    window_rx: UnboundedReceiver<WindowActionRequest>,
 ) -> Result<(), Box<dyn Error>> {
     let app = gtk4::Application::new(Some("com.www.idgets"), ApplicationFlags::FLAGS_NONE);
-    let event_recv = std::cell::RefCell::new(Some(event_recv));
+    let event_rx = RefCell::new(Some(event_rx));
+    let window_rx = RefCell::new(Some(window_rx));
 
     app.connect_activate(move |app| {
         util::disable_gtk_logs();
@@ -25,7 +27,7 @@ pub fn setup_widgets(
         let widgets = factory.create_widgets(&config, config.port);
         let widgets = Rc::new(widgets);
 
-        if let Some(mut recv) = event_recv.borrow_mut().take() {
+        if let Some(mut recv) = event_rx.borrow_mut().take() {
             let widgets = Rc::clone(&widgets);
 
             gtk4::glib::spawn_future_local(async move {
@@ -53,6 +55,16 @@ pub fn setup_widgets(
                             event.widget_label, event.event_name
                         );
                     }
+                }
+            });
+        }
+
+        if let Some(mut recv) = window_rx.borrow_mut().take() {
+            let widgets = Rc::clone(&widgets);
+
+            gtk4::glib::spawn_future_local(async move {
+                while let Some(window_event) = recv.recv().await {
+                    debug!("Received window event: {:?}", window_event);
                 }
             });
         }
