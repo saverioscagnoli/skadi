@@ -1,4 +1,4 @@
-use crate::window::WindowActionRequest;
+use crate::window::{WindowAction, WindowActionRequest};
 use axum::{
     Router,
     extract::{Json, Path, State},
@@ -24,13 +24,6 @@ use tower_http::{
 };
 use traccia::{debug, error, info, warn};
 
-#[derive(Debug)]
-pub struct EventRequest {
-    pub widget_label: String,
-    pub event_name: String,
-    pub payload: String,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct ListenBody {
     pub script: String,
@@ -40,7 +33,6 @@ pub struct ListenBody {
 
 #[derive(Clone)]
 pub struct AppState {
-    pub event_tx: UnboundedSender<EventRequest>,
     pub window_tx: UnboundedSender<WindowActionRequest>,
     /// The hash set consists of [widget_label+command_name+command_args]
     /// Concatenate them so we don't have to use a HashMap<String, Vec<String>>
@@ -51,13 +43,11 @@ pub async fn start_server(
     port: u16,
     root_dir: PathBuf,
     ready_tx: oneshot::Sender<()>,
-    event_tx: UnboundedSender<EventRequest>,
     window_tx: UnboundedSender<WindowActionRequest>,
 ) -> Result<(), Box<dyn Error>> {
     let cors = CorsLayer::new().allow_origin(cors::Any);
 
     let app_state = AppState {
-        event_tx,
         window_tx,
         active_commands: Arc::new(Mutex::new(HashSet::new())),
     };
@@ -177,7 +167,7 @@ pub async fn listen(State(app_state): State<AppState>, Json(body): Json<ListenBo
 
     let widget_label = body.widget_label.clone();
     let event_name = body.script.clone();
-    let event_tx = app_state.event_tx.clone();
+    let window_tx = app_state.window_tx.clone();
 
     tokio::spawn(async move {
         info!(
@@ -202,13 +192,12 @@ pub async fn listen(State(app_state): State<AppState>, Json(body): Json<ListenBo
         let mut reader = BufReader::new(stdout).lines();
 
         while let Ok(Some(line)) = reader.next_line().await {
-            let event = EventRequest {
-                widget_label: widget_label.clone(),
-                event_name: event_name.clone(),
-                payload: line,
+            let action = WindowActionRequest {
+                target: widget_label.clone(),
+                action: WindowAction::DispatchEvent(event_name.clone(), line),
             };
 
-            if event_tx.send(event).is_err() {
+            if window_tx.send(action).is_err() {
                 error!("Failed to send event, receiver dropped");
                 break;
             }

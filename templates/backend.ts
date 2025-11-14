@@ -85,10 +85,10 @@ function useListen<T>(
 const windowHandle = {
   show: async () => {
     try {
-      let response = await fetch("backend/window/show", {
+      let response = await fetch("/backend/window/show", {
         method: "POST",
         headers: {
-          "Conteny-Type": "appliction/json",
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           label: document.title,
@@ -100,6 +100,25 @@ const windowHandle = {
       }
     } catch (err) {
       console.error("Failed to show window", err.message);
+    }
+  },
+  hide: async () => {
+    try {
+      let response = await fetch("/backend/window/hide", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          label: document.title,
+        }),
+      });
+
+      if (!response.ok) {
+        console.error(`Failed to hide window: ${response.status}`);
+      }
+    } catch (err) {
+      console.error("Failed to hide window", err.message);
     }
   },
 };

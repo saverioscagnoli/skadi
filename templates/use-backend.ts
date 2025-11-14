@@ -19,6 +19,7 @@ type UseListenHook = <T = string>(
 
 type WindowHandle = {
   show: () => Promise<void>;
+  hide: () => Promise<void>;
 };
 
 type BackendContextType = {

@@ -85,7 +85,6 @@ async fn main() {
     }
 
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
-    let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
     let (window_tx, window_rx) = tokio::sync::mpsc::unbounded_channel();
 
     tokio::spawn(async move {
@@ -93,7 +92,6 @@ async fn main() {
             config.port,
             paths::local_dir().join("build"),
             ready_tx,
-            event_tx,
             window_tx,
         )
         .await
@@ -108,7 +106,7 @@ async fn main() {
         return;
     }
 
-    if let Err(e) = app::setup_widgets(config, event_rx, window_rx) {
+    if let Err(e) = app::setup_widgets(config, window_rx) {
         fatal!("Application error: {}", e);
     }
 }
