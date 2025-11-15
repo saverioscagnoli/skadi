@@ -1,20 +1,22 @@
+use crate::window::{WindowAction, WindowActionRequest};
 use axum::{
     Router,
-    extract::{Json, State},
+    extract::{Json, Path, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
 };
-use common::util;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
-use std::error::Error;
-use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use std::{collections::HashMap, error::Error};
+use std::{collections::HashSet, path::PathBuf};
 use tokio::net::TcpListener;
 use tokio::sync::{RwLock, oneshot};
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    sync::Mutex,
+};
 use tokio::{process::Command, sync::mpsc::UnboundedSender};
 use tower_http::{
     cors::{self, CorsLayer},
@@ -22,50 +24,45 @@ use tower_http::{
 };
 use traccia::{debug, error, info, warn};
 
-#[derive(Debug)]
-pub struct EventRequest {
-    pub widget_label: String,
-    pub event_name: String,
-    pub payload: String,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct ListenBody {
     pub script: String,
+    pub args: Vec<String>,
     pub widget_label: String,
 }
 
 #[derive(Clone)]
 pub struct AppState {
-    pub event_tx: UnboundedSender<EventRequest>,
-    pub active_listeners: Arc<RwLock<HashSet<(String, String)>>>,
+    pub window_tx: UnboundedSender<WindowActionRequest>,
+    /// The hash set consists of [widget_label+command_name+command_args]
+    /// Concatenate them so we don't have to use a HashMap<String, Vec<String>>
+    pub active_commands: Arc<Mutex<HashSet<String>>>,
 }
 
 pub async fn start_server(
     port: u16,
     root_dir: PathBuf,
     ready_tx: oneshot::Sender<()>,
-    event_tx: UnboundedSender<EventRequest>,
+    window_tx: UnboundedSender<WindowActionRequest>,
 ) -> Result<(), Box<dyn Error>> {
     let cors = CorsLayer::new().allow_origin(cors::Any);
 
     let app_state = AppState {
-        event_tx,
-        active_listeners: Arc::new(RwLock::new(HashSet::new())),
+        window_tx,
+        active_commands: Arc::new(Mutex::new(HashSet::new())),
     };
 
     let mut app = Router::new()
         .route("/healthcheck", get(healthcheck))
         .route("/exec", post(exec))
         .route("/listen", post(listen))
+        .route("/window/{action}", post(window_action_handler))
         .layer(cors)
         .with_state(app_state);
 
-    if !util::dev() {
-        app = Router::new()
-            .nest("/backend", app)
-            .fallback_service(ServeDir::new(&root_dir));
-    }
+    app = Router::new()
+        .nest("/backend", app)
+        .fallback_service(ServeDir::new(&root_dir));
 
     debug!("Serving directory: {}", root_dir.display());
 
@@ -88,7 +85,7 @@ pub async fn healthcheck() -> impl IntoResponse {
 #[derive(Deserialize)]
 struct ExecRequest {
     command: String,
-    args: Option<Vec<String>>,
+    args: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -96,22 +93,16 @@ struct ExecMessage {
     success: bool,
     stdout: String,
     stderr: String,
-    exit_code: Option<i32>,
 }
 
 async fn exec(Json(payload): Json<ExecRequest>) -> impl IntoResponse {
-    debug!(
-        "Executing command: {} with args: {:?}",
-        payload.command, payload.args
+    info!(
+        "Executing command: {} {:?}",
+        &payload.command, &payload.args
     );
 
-    let mut cmd = Command::new(&payload.command);
-
-    if let Some(args) = payload.args {
-        cmd.args(&args);
-    }
-
-    let output = cmd
+    let output = Command::new(&payload.command)
+        .args(&payload.args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
@@ -119,33 +110,29 @@ async fn exec(Json(payload): Json<ExecRequest>) -> impl IntoResponse {
 
     match output {
         Ok(output) => {
+            let success = output.status.success();
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            let exit_code = output.status.code();
-            let success = output.status.success();
-
-            info!(
-                "Command executed with exit code: {:?}, success: {}",
-                exit_code, success
-            );
 
             let response = ExecMessage {
                 success,
                 stdout,
                 stderr,
-                exit_code,
             };
 
             Json(response)
         }
 
         Err(e) => {
-            error!("Failed to execute command: {}", e);
+            warn!(
+                "Command {} {:?} failed: {}",
+                &payload.command, &payload.args, e
+            );
+
             let response = ExecMessage {
                 success: false,
                 stdout: String::new(),
                 stderr: e.to_string(),
-                exit_code: None,
             };
 
             Json(response)
@@ -154,37 +141,42 @@ async fn exec(Json(payload): Json<ExecRequest>) -> impl IntoResponse {
 }
 
 pub async fn listen(State(app_state): State<AppState>, Json(body): Json<ListenBody>) {
-    debug!(
-        "Setting up listener for widget: {} with script: {}",
-        body.widget_label, body.script
+    let set_key = format!(
+        "{}{}{}",
+        body.widget_label,
+        body.script,
+        body.args.join(" ")
     );
-
-    let listener_key = (body.widget_label.clone(), body.script.clone());
 
     // Check if this listener is already active
     {
-        let mut listeners = app_state.active_listeners.write().await;
+        let mut widget_commands = app_state.active_commands.lock().await;
 
-        if listeners.contains(&listener_key) {
+        if widget_commands.contains(&set_key) {
             warn!(
-                "Ignoring duplicate listener request for widget: {} with script: {} (This is normal if you have multiple instances of the widget)",
-                body.widget_label, body.script
+                "Ignoring duplicate listener request for widget {} with script: {} {:?} (this is normal if you have multiple instances of the widget)",
+                &body.widget_label, &body.script, &body.args
             );
+
             return;
         }
 
-        listeners.insert(listener_key.clone());
+        let set_key = set_key.clone();
+        widget_commands.insert(set_key);
     }
 
     let widget_label = body.widget_label.clone();
-    let event_name = body.script.clone();
-    let event_tx = app_state.event_tx.clone();
-    let active_listeners = app_state.active_listeners.clone();
+    let event_name = format!("{} {}", &body.script, &body.args.join(" "));
+    let window_tx = app_state.window_tx.clone();
 
     tokio::spawn(async move {
-        let mut child = match Command::new("bash")
-            .arg("-c")
-            .arg(&body.script)
+        info!(
+            "{} is listening to: {} {:?}",
+            widget_label, event_name, &body.args
+        );
+
+        let mut child = match Command::new(&body.script)
+            .args(&body.args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -200,30 +192,33 @@ pub async fn listen(State(app_state): State<AppState>, Json(body): Json<ListenBo
         let mut reader = BufReader::new(stdout).lines();
 
         while let Ok(Some(line)) = reader.next_line().await {
-            let event = EventRequest {
-                widget_label: widget_label.clone(),
-                event_name: event_name.clone(),
-                payload: line,
+            let action = WindowActionRequest {
+                target: widget_label.clone(),
+                action: WindowAction::DispatchEvent(event_name.clone(), line),
             };
 
-            if event_tx.send(event).is_err() {
+            if window_tx.send(action).is_err() {
                 error!("Failed to send event, receiver dropped");
                 break;
             }
         }
 
         match child.wait().await {
-            Ok(status) => debug!("Command exited with: {}", status),
+            Ok(status) => debug!("Listener exited with: {}", status),
             Err(e) => error!("Error waiting for command: {}", e),
         }
 
         // Remove this listener from active set when it finishes
-        let mut listeners = active_listeners.write().await;
-        listeners.remove(&listener_key);
+        let mut widget_commands = app_state.active_commands.lock().await;
 
+        widget_commands.remove(&set_key);
         debug!(
-            "Listener removed for widget: {} with script: {}",
-            listener_key.0, listener_key.1
+            "Listener removed for widget: {} with script: {} {:?}",
+            &body.widget_label, &body.script, &body.args
         );
     });
+}
+
+pub async fn window_action_handler(Path(payload): Path<String>) -> impl IntoResponse {
+    debug!("window action: {}", payload);
 }
