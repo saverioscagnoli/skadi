@@ -54,6 +54,7 @@ pub struct Window {
     pub gtk_window: gtk4::ApplicationWindow,
     pub webview: WebView,
     pub id: u32,
+    #[allow(unused)]
     pub monitor_id: String,
 }
 
