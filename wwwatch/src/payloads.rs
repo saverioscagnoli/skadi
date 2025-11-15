@@ -59,8 +59,9 @@ pub struct NetworkPayload {
     pub interfaces: Vec<NetworkInterface>,
 }
 
-#[derive(Debug, Default, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct InfoPayload {
+    pub op: Op,
     pub cpu: Option<CpuPayload>,
     pub mem: Option<MemPayload>,
     pub disks: Option<DiskPayload>,

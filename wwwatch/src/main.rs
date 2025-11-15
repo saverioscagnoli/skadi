@@ -65,6 +65,7 @@ struct Args {
 #[serde(rename_all = "lowercase")]
 enum Op {
     Workspaces,
+    Info,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
