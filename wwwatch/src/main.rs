@@ -1,4 +1,5 @@
 mod info;
+mod notifications;
 mod payloads;
 
 use crate::payloads::WorkspacePayload;
@@ -15,22 +16,24 @@ enum Command {
 
 #[derive(Debug, clap::Parser)]
 struct Args {
+    #[arg(long, help = "Subscribe to workspace events", default_value_t = false)]
+    workspaces: bool,
+
     #[arg(
-        short,
         long,
-        help = "Subscribe to workspace events",
+        help = "Intercept notifications from dbus",
         default_value_t = false
     )]
-    workspaces: bool,
+    notifications: bool,
+
     #[arg(
-        short,
         long,
         help = "Queries cpu info every <interval> milliseconds",
         default_value_t = false
     )]
     cpu: bool,
+
     #[arg(
-        short,
         long,
         help = "Queries memory info every <interval> milliseconds",
         default_value_t = false
@@ -38,21 +41,19 @@ struct Args {
     mem: bool,
 
     #[arg(
-        short,
         long,
         help = "Queries disk info every <interval> milliseconds",
         default_value_t = false
     )]
     disk: bool,
+
     #[arg(
-        short,
         long,
         help = "Queries network info every <interval> milliseconds",
         default_value_t = false
     )]
     network: bool,
     #[arg(
-        short,
         long,
         help = "Interval in milliseconds, used to query information about the system",
         default_value_t = 1000
@@ -64,11 +65,12 @@ struct Args {
 #[repr(u8)]
 #[serde(rename_all = "lowercase")]
 enum Op {
-    Workspaces,
     Info,
+    Workspaces,
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     let mut event_list = Vec::new();
     let mut connection = Connection::new()?;
@@ -102,6 +104,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         };
 
         println!("{}", serde_json::to_string(&payload).unwrap());
+    }
+
+    if args.notifications {
+        tokio::spawn(async move {
+            if let Err(e) = notifications::check().await {
+                println!("{}", e);
+            }
+        });
     }
 
     // One connection for events
