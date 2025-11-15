@@ -1,8 +1,5 @@
 use common::util;
-use std::{
-    error::Error,
-    process::{Command, Stdio},
-};
+use std::error::Error;
 use traccia::{Colorize, Style, info, warn};
 use which::which;
 
@@ -79,31 +76,17 @@ impl Distro {
 }
 
 fn install_node(distro: &Distro) -> Result<(), Box<dyn Error>> {
-    let status = Command::new("bash")
-        .arg("-c")
-        .arg(distro.install_node())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()?;
-
-    if !status.success() {
-        return Err("Could not install Node.js. Please install it manually.".into());
-    }
+    util::spawn_capture(distro.install_node(), |l| {
+        println!("{}", l.dim());
+    })?;
 
     Ok(())
 }
 
 fn install_yarn() -> Result<(), Box<dyn Error>> {
-    let status = Command::new("bash")
-        .arg("-c")
-        .arg("sudo npm i -g yarn")
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()?;
-
-    if !status.success() {
-        return Err("Could not install Yarn. Please install it manually.".into());
-    }
+    util::spawn_capture("sudo npm i -g yarn", |l| {
+        println!("{}", l.dim());
+    })?;
 
     Ok(())
 }
