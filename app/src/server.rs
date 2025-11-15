@@ -166,7 +166,7 @@ pub async fn listen(State(app_state): State<AppState>, Json(body): Json<ListenBo
     }
 
     let widget_label = body.widget_label.clone();
-    let event_name = body.script.clone();
+    let event_name = format!("{} {}", &body.script, &body.args.join(" "));
     let window_tx = app_state.window_tx.clone();
 
     tokio::spawn(async move {

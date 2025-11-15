@@ -41,7 +41,7 @@ function useListen<T>(
 ) {
   useEffect(() => {
     let ctrl = new AbortController();
-    console.log("useListen", { script, args, widget_label: document.title });
+
     // Start listening on the backend
     fetch("/backend/listen", {
       method: "POST",
@@ -66,7 +66,8 @@ function useListen<T>(
       });
 
     // Set up event listener with unique event name that includes args
-    const eventName = args.length > 0 ? `${script} ${args.join(" ")}` : script;
+    let eventName = args.length > 0 ? `${script} ${args.join(" ")}` : script;
+    console.log(eventName);
     // @ts-ignore
     window.addEventListener(
       eventName,
