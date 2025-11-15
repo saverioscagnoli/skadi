@@ -60,6 +60,7 @@ pub struct Window {
 
 impl Window {
     pub fn show(&self) {
+        debug!("Showing window {}", self.id);
         self.gtk_window.show();
         self.gtk_window.present();
     }
