@@ -58,6 +58,7 @@ pub fn setup_widgets(
 
                         WindowAction::Hide => {
                             for widget in widgets.iter() {
+                                debug!("{} {}", widget.config.label, event.target);
                                 if widget.config.label == event.target {
                                     for window in &widget.windows {
                                         window.hide();

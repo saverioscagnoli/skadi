@@ -1,5 +1,6 @@
 use gtk4::prelude::*;
-use std::fmt;
+use std::{fmt, str::FromStr};
+use traccia::debug;
 use webkit6::{WebView, prelude::WebViewExt};
 
 type EventName = String;
@@ -63,6 +64,7 @@ impl Window {
     }
 
     pub fn hide(&self) {
+        debug!("Hiding window {}", self.id);
         self.gtk_window.hide();
     }
 

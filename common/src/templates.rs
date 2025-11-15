@@ -8,7 +8,7 @@ impl Templates {
     pub const DEFAULT_CONFIG: &'static str = include_str!("../../templates/config.default.json");
     pub const LICENSE: &'static str = include_str!("../../templates/LICENSE");
     pub const PACKAGE_JSON: &'static str = include_str!("../../templates/package.json");
-    pub const VITE_CONFIG: &'static str = include_str!("../../templates/vite.config.js");
+    pub const VITE_CONFIG: &'static str = include_str!("../../templates/vite.config.ts");
     pub const BACKEND_TS: &'static str = include_str!("../../templates/backend.ts");
     pub const USE_BACKEND_HOOK: &'static str = include_str!("../../templates/use-backend.ts");
 

@@ -7,12 +7,12 @@ use axum::{
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
+use std::error::Error;
 use std::process::Stdio;
 use std::sync::Arc;
-use std::{collections::HashMap, error::Error};
 use std::{collections::HashSet, path::PathBuf};
 use tokio::net::TcpListener;
-use tokio::sync::{RwLock, oneshot};
+use tokio::sync::oneshot;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     sync::Mutex,
@@ -29,6 +29,12 @@ pub struct ListenBody {
     pub script: String,
     pub args: Vec<String>,
     pub widget_label: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WindowActionHandlerBody {
+    /// The label of the widget
+    pub target_label: String,
 }
 
 #[derive(Clone)]
@@ -219,6 +225,31 @@ pub async fn listen(State(app_state): State<AppState>, Json(body): Json<ListenBo
     });
 }
 
-pub async fn window_action_handler(Path(payload): Path<String>) -> impl IntoResponse {
-    debug!("window action: {}", payload);
+pub async fn window_action_handler(
+    State(app_state): State<AppState>,
+    Path(payload): Path<String>,
+    Json(body): Json<WindowActionHandlerBody>,
+) -> impl IntoResponse {
+    let action = match payload.as_str() {
+        "show" => WindowAction::Show,
+        "hide" => WindowAction::Hide,
+        _ => {
+            warn!("Received invalid action {}", &payload);
+            return StatusCode::BAD_REQUEST;
+        }
+    };
+
+    let request = WindowActionRequest {
+        target: body.target_label,
+        action,
+    };
+
+    if let Err(e) = app_state.window_tx.send(request) {
+        error!("Failed to handle window action: {}", e);
+        return StatusCode::INTERNAL_SERVER_ERROR;
+    } else {
+        warn!("dasdfsdf");
+    }
+
+    StatusCode::OK
 }
