@@ -57,3 +57,24 @@ pub fn local_dir() -> PathBuf {
 
     path
 }
+
+/// Returns /tmp/wwwidgets, creating it if necessary.
+///
+/// This directory is used to store temporary files,
+/// and the webview will have access to it using tmp://file-name,
+/// so that the user can read files from it
+///
+/// The notification daemon in the same project uses it to store
+/// notifciation images.
+pub fn tmp_dir() -> PathBuf {
+    let path = PathBuf::from("/tmp/wwwidgets");
+
+    if !path.exists()
+        && let Err(e) = std::fs::create_dir_all(&path)
+    {
+        fatal!("Could not determine or create local data directory: {}", e);
+        std::process::exit(1);
+    }
+
+    path
+}

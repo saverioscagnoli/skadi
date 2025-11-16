@@ -1,6 +1,7 @@
 use crate::window::Window;
 use common::{
     config::{Anchor, Config, Layer, WidgetConfig},
+    paths,
     util::{self},
 };
 use gtk4::{
@@ -10,7 +11,7 @@ use gtk4::{
 use gtk4_layer_shell::{Edge, LayerShell};
 use std::collections::HashMap;
 use traccia::{debug, error, info};
-use webkit6::{WebContext, WebView, prelude::WebViewExt};
+use webkit6::{URISchemeRequest, WebContext, WebView, prelude::WebViewExt};
 
 pub struct WidgetFactory<'a> {
     app: &'a gtk4::Application,
@@ -21,6 +22,38 @@ pub struct WidgetFactory<'a> {
 impl<'a> WidgetFactory<'a> {
     pub fn new(app: &'a gtk4::Application) -> Self {
         let context = WebContext::new();
+
+        // Custom uri scheme to read from /tmp/wwwidgets
+        // Useful for the end user to read files from the webview
+        context.register_uri_scheme("tmp", |request: &URISchemeRequest| {
+            let uri = request.uri().unwrap();
+            let path = uri.strip_prefix("tmp://").unwrap_or("");
+            let path = paths::tmp_dir().join(path);
+
+            debug!("Handling tmp:// request from {}", &path.display());
+
+            match std::fs::read(&path) {
+                Ok(data) => {
+                    let stream =
+                        gtk4::gio::MemoryInputStream::from_bytes(&gtk4::glib::Bytes::from(&data));
+                    let mime = mime_guess::from_path(&path);
+
+                    request.finish(&stream, data.len() as i64, mime.first_raw());
+                }
+
+                Err(e) => {
+                    request.finish_error(&mut gtk4::glib::Error::new(
+                        gtk4::glib::FileError::Noent,
+                        &format!("Failed to read file: {}", e),
+                    ));
+                }
+            }
+        });
+
+        info!(
+            "Registered custom URI scheme at tmp:// pointing to {}",
+            paths::tmp_dir().display()
+        );
 
         let Some(display) = gdk::Display::default() else {
             error!("Failed to get default display for monitor enumeration.");
@@ -139,7 +172,6 @@ impl Widget {
             if util::debug() {
                 if let Some(settings) = webkit6::prelude::WebViewExt::settings(&webview) {
                     debug!("Web inspector enabled.");
-                    settings.set_enable_developer_extras(true);
                 }
             } else {
                 webview.connect_context_menu(|_, _, _| true);

@@ -1,6 +1,9 @@
-use crate::payloads::{
-    CoreInfo, CpuPayload, DiskInfo, DiskPayload, InfoPayload, MemPayload, NetworkInterface,
-    NetworkPayload,
+use crate::{
+    Op,
+    payloads::{
+        CoreInfo, CpuPayload, DiskInfo, DiskPayload, InfoPayload, MemPayload, NetworkInterface,
+        NetworkPayload,
+    },
 };
 use std::{thread, time::Duration};
 use sysinfo::{
@@ -78,7 +81,13 @@ pub fn query_info(cpu: bool, mem: bool, disk: bool, network: bool, interval_ms: 
         disk_refresh_kind = DiskRefreshKind::everything();
     }
 
-    let mut info_payload = InfoPayload::default();
+    let mut info_payload = InfoPayload {
+        op: Op::Info,
+        cpu: None,
+        mem: None,
+        disks: None,
+        network: None,
+    };
     let mut system = System::new_with_specifics(refresh_kind);
     let mut components = Components::new_with_refreshed_list();
     let disks = Disks::new_with_refreshed_list_specifics(disk_refresh_kind);

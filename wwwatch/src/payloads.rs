@@ -1,5 +1,6 @@
 use crate::Op;
 use serde::Serialize;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkspacePayload<'a> {
@@ -59,10 +60,42 @@ pub struct NetworkPayload {
     pub interfaces: Vec<NetworkInterface>,
 }
 
-#[derive(Debug, Default, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct InfoPayload {
+    pub op: Op,
     pub cpu: Option<CpuPayload>,
     pub mem: Option<MemPayload>,
     pub disks: Option<DiskPayload>,
     pub network: Option<NetworkPayload>,
+}
+
+/// https://specifications.freedesktop.org/notification/latest/basic-design.html
+#[derive(Debug, Clone, Serialize)]
+pub struct NotificationPayload {
+    pub op: Op,
+    pub app_name: String,
+    /// An optional ID of an existing notification that this notification is intended to replace.
+    pub replaces_id: u32,
+    pub notification_icon: Option<String>,
+    /// Path to the image file.
+    pub image: Option<PathBuf>,
+    /// This is a single line overview of the notification. For instance,
+    /// "You have mail" or "A friend has come online".
+    /// It should generally not be longer than 40 characters, though this is not a requirement,
+    /// and server implementations should word wrap if necessary.
+    /// The summary must be encoded using UTF-8.
+    pub summary: String,
+    /// This is a multi-line body of text. Each line is a paragraph,
+    /// server implementations are free to word wrap them as they see fit.
+    /// The body may contain simple markup as specified in Markup.
+    /// It must be encoded using UTF-8.
+    /// If the body is omitted, just the summary is displayed.
+    pub body: String,
+    pub actions: Vec<String>,
+    /// The timeout time in milliseconds since the display of the notification at which
+    /// the notification should automatically close.
+    /// If -1, the notification's expiration time is dependent
+    /// on the notification server's settings, and may vary for the type of notification.
+    /// If 0, the notification never expires.
+    pub expiration: i32,
 }
