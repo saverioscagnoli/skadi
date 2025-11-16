@@ -172,6 +172,7 @@ impl Widget {
             if util::debug() {
                 if let Some(settings) = webkit6::prelude::WebViewExt::settings(&webview) {
                     debug!("Web inspector enabled.");
+                    settings.set_enable_developer_extras(true);
                 }
             } else {
                 webview.connect_context_menu(|_, _, _| true);
