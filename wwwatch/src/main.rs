@@ -67,6 +67,7 @@ struct Args {
 enum Op {
     Info,
     Workspaces,
+    Notification,
 }
 
 #[tokio::main]
@@ -108,7 +109,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     if args.notifications {
         tokio::spawn(async move {
-            if let Err(e) = notifications::check().await {
+            if let Err(e) = notifications::listen().await {
                 println!("{}", e);
             }
         });

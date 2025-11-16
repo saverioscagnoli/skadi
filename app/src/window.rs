@@ -1,5 +1,5 @@
 use gtk4::prelude::*;
-use std::{fmt, str::FromStr};
+use std::fmt;
 use traccia::debug;
 use webkit6::{WebView, prelude::WebViewExt};
 

@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-hyprland = "0.3.13"
 swayipc = "4.0.0"
 serde.workspace = true
 serde_json.workspace = true
@@ -12,3 +11,5 @@ clap.workspace = true
 tokio.workspace = true
 sysinfo = "0.37.2"
 zbus = { version = "5.12.0", features = ["tokio"] }
+image = "0.25.9"
+common.workspace = true

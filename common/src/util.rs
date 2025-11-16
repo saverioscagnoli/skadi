@@ -5,6 +5,7 @@ use gtk4::{
     },
     gio::prelude::ListModelExtManual,
 };
+use rand::{Rng, distr::Alphanumeric};
 use std::{
     collections::HashMap,
     error::Error,
@@ -94,4 +95,12 @@ pub fn spawn_capture<S: AsRef<str>, F: Fn(&str)>(
     }
 
     Ok(child.wait()?)
+}
+
+pub fn random_string(length: usize) -> String {
+    rand::rng()
+        .sample_iter(Alphanumeric)
+        .take(length)
+        .map(char::from)
+        .collect::<String>()
 }
