@@ -183,10 +183,12 @@ impl Notifications {
         1
     }
 
-    fn get_server_information(&self) -> (&str, &str) {
+    fn get_server_information(&self) -> (&str, &str, &str, &str) {
         (
             "wwwatch",   // name
             "wwwidgets", // vendor
+            "0.1.0",     // version
+            "1.2",       // spec_version
         )
     }
 
