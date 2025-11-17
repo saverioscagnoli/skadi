@@ -250,8 +250,6 @@ pub async fn window_action_handler(
     if let Err(e) = app_state.window_tx.send(request) {
         error!("Failed to handle window action: {}", e);
         return StatusCode::INTERNAL_SERVER_ERROR;
-    } else {
-        warn!("dasdfsdf");
     }
 
     StatusCode::OK

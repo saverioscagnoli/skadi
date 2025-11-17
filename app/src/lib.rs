@@ -32,36 +32,38 @@ pub fn setup_widgets(
             let widgets = Rc::clone(&widgets);
 
             gtk4::glib::spawn_future_local(async move {
-                while let Some(event) = recv.recv().await {
-                    debug!("Handling window action: {:?}", event.action);
+                loop {
+                    while let Some(event) = recv.recv().await {
+                        debug!("Handling window action: {:?}", event.action);
 
-                    match event.action {
-                        WindowAction::DispatchEvent(name, payload) => {
-                            for widget in widgets.iter() {
-                                if widget.config.label == event.target {
-                                    for window in &widget.windows {
-                                        window.dispatch(&name, &payload);
+                        match event.action {
+                            WindowAction::DispatchEvent(name, payload) => {
+                                for widget in widgets.iter() {
+                                    if widget.config.label == event.target {
+                                        for window in &widget.windows {
+                                            window.dispatch(&name, &payload);
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        WindowAction::Show => {
-                            for widget in widgets.iter() {
-                                if widget.config.label == event.target {
-                                    for window in &widget.windows {
-                                        window.show();
+                            WindowAction::Show => {
+                                for widget in widgets.iter() {
+                                    if widget.config.label == event.target {
+                                        for window in &widget.windows {
+                                            window.show();
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        WindowAction::Hide => {
-                            for widget in widgets.iter() {
-                                debug!("{} {}", widget.config.label, event.target);
-                                if widget.config.label == event.target {
-                                    for window in &widget.windows {
-                                        window.hide();
+                            WindowAction::Hide => {
+                                for widget in widgets.iter() {
+                                    debug!("{} {}", widget.config.label, event.target);
+                                    if widget.config.label == event.target {
+                                        for window in &widget.windows {
+                                            window.hide();
+                                        }
                                     }
                                 }
                             }
