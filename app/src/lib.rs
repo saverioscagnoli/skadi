@@ -72,12 +72,6 @@ pub fn setup_widgets(
                 }
             });
         }
-
-        for widget in widgets.iter() {
-            for window in &widget.windows {
-                window.show();
-            }
-        }
     });
 
     // Run without any args otherwise gtk will capture rust's args

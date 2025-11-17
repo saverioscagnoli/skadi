@@ -206,6 +206,10 @@ pub struct WidgetConfig {
 
     #[serde(default = "Config::default_opacity")]
     pub opacity: f64,
+
+    /// Whether the widget should be hidden by default
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

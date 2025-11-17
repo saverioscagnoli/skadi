@@ -285,7 +285,7 @@ impl Widget {
                 window.set_anchor(gtk4_layer_shell::Edge::Right, true);
             }
 
-            windows.push(Window {
+            let window = Window {
                 gtk_window: window,
                 webview,
                 id: i as u32,
@@ -293,7 +293,16 @@ impl Widget {
                     .connector()
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| format!("Monitor {}", i)),
-            });
+            };
+
+            if config.hidden {
+                debug!("Widget '{}' starts hidden", config.label);
+                window.hide();
+            } else {
+                window.show();
+            }
+
+            windows.push(window);
         }
 
         Self { windows, config }
