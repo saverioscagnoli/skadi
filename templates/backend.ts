@@ -11,7 +11,7 @@ async function exec(
   args: string[] = [],
 ): Promise<BackendMessage> {
   try {
-    let response = await fetch("/backend/exec", {
+    let response = await fetch("/exec", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -43,7 +43,7 @@ function useListen<T>(
     let ctrl = new AbortController();
 
     // Start listening on the backend
-    fetch("/backend/listen", {
+    fetch("/listen", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -86,7 +86,7 @@ function useListen<T>(
 const windowHandle = {
   show: async (label: string = document.title) => {
     try {
-      let response = await fetch("/backend/window/show", {
+      let response = await fetch("/window/show", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -105,7 +105,7 @@ const windowHandle = {
   },
   hide: async (label: string = document.title) => {
     try {
-      let response = await fetch("/backend/window/hide", {
+      let response = await fetch("/window/hide", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

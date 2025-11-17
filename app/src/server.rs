@@ -58,16 +58,13 @@ pub async fn start_server(
         active_commands: Arc::new(Mutex::new(HashSet::new())),
     };
 
-    let mut app = Router::new()
+    let app = Router::new()
         .route("/healthcheck", get(healthcheck))
         .route("/exec", post(exec))
         .route("/listen", post(listen))
         .route("/window/{action}", post(window_action_handler))
         .layer(cors)
-        .with_state(app_state);
-
-    app = Router::new()
-        .nest("/backend", app)
+        .with_state(app_state)
         .fallback_service(ServeDir::new(&root_dir));
 
     debug!("Serving directory: {}", root_dir.display());
@@ -209,8 +206,14 @@ pub async fn listen(State(app_state): State<AppState>, Json(body): Json<ListenBo
             }
         }
 
-        match child.wait().await {
-            Ok(status) => debug!("Listener exited with: {}", status),
+        match child.wait_with_output().await {
+            Ok(output) => {
+                debug!(
+                    "Listener finished.\nstdout: {}\nstderr: {}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
             Err(e) => error!("Error waiting for command: {}", e),
         }
 

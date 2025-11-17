@@ -26,22 +26,22 @@ fn write_templates<P: AsRef<Path>>(path: P) -> Result<(), Box<dyn Error>> {
 
     debug!("Wrote package.json to {}", path.display());
 
-    if let Err(e) = std::fs::write(path.join("vite.config.js"), Templates::VITE_CONFIG) {
+    if let Err(e) = std::fs::write(path.join("vite.config.ts"), Templates::VITE_CONFIG) {
         return Err(format!(
-            "Could not write vite.config.js to {}: {}",
+            "Could not write vite.config.ts to {}: {}",
             path.display(),
             e
         )
         .into());
     }
 
-    debug!("Wrote vite.config.js to {}", path.display());
+    debug!("Wrote vite.config.ts to {}", path.display());
 
     if let Err(e) = std::fs::write(path.join("backend.ts"), Templates::BACKEND_TS) {
         return Err(format!("Could not write backend.ts to {}: {}", path.display(), e).into());
     }
 
-    debug!("Wrote utils.js to {}", path.display());
+    debug!("Wrote backend.ts to {}", path.display());
 
     // Write types and hooks to .config dir
     let config_dir = paths::config_dir();

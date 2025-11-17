@@ -6,11 +6,11 @@ use crate::{
     widget::WidgetFactory,
     window::{WindowAction, WindowActionRequest},
 };
-use common::{config::Config, paths, util};
+use common::{config::Config, util};
 use gtk4::gio::{ApplicationFlags, prelude::*};
 use std::{cell::RefCell, error::Error, rc::Rc};
 use tokio::sync::mpsc::UnboundedReceiver;
-use traccia::{debug, warn};
+use traccia::debug;
 
 pub use server::start_server;
 

@@ -24,6 +24,7 @@ function resolveHtmlIndices() {
 
 // https://vite.dev/config/
 export default defineConfig({
+  root: localDir,
   base: "./",
   plugins: [
     react({
@@ -64,10 +65,21 @@ export default defineConfig({
       Expires: "0",
     },
     proxy: {
-      "/backend": {
+      "/exec": {
         target: "http://localhost:10978",
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/backend/, ""),
+      },
+      "/listen": {
+        target: "http://localhost:10978",
+        changeOrigin: true,
+      },
+      "/window": {
+        target: "http://localhost:10978",
+        changeOrigin: true,
+      },
+      "/healthcheck": {
+        target: "http://localhost:10978",
+        changeOrigin: true,
       },
     },
   },

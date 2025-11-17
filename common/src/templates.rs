@@ -27,7 +27,7 @@ impl Templates {
             {}
 
             import {{ createRoot }} from "react-dom/client";
-            import * as backend from "../backend.ts";
+            import * as backend from "/backend.ts";
             import {{ BackendContext }} from "{}";
 
             import Index from "{}";
