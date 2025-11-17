@@ -32,12 +32,14 @@ pub struct MemPayload {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DiskInfo {
+    pub primary: bool,
     pub total: u64,
     pub used: u64,
     pub free: u64,
     pub read: u64,
     pub write: u64,
     pub name: String,
+    pub mount_point: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

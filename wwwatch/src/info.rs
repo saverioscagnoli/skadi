@@ -5,7 +5,7 @@ use crate::{
         NetworkPayload,
     },
 };
-use std::{thread, time::Duration};
+use std::{path::Path, thread, time::Duration};
 use sysinfo::{
     Components, CpuRefreshKind, DiskRefreshKind, Disks, MemoryRefreshKind, NetworkData, Networks,
     RefreshKind, System,
@@ -149,14 +149,17 @@ pub fn query_info(cpu: bool, mem: bool, disk: bool, network: bool, interval_ms: 
                     let free = disk.available_space();
                     let used = total - free;
                     let usage = disk.usage();
+                    let primary = Path::new("/").starts_with(disk.mount_point());
 
                     disks_payload.push(DiskInfo {
+                        primary,
                         total,
                         used,
                         free,
                         read: usage.total_read_bytes,
                         write: usage.total_written_bytes,
                         name: disk.name().to_string_lossy().to_string(),
+                        mount_point: disk.mount_point().to_string_lossy().to_string(),
                     });
                 }
 
