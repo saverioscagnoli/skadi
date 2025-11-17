@@ -76,16 +76,32 @@ pub fn spawn_capture<S: AsRef<str>, F: Fn(&str)>(
         .stderr(Stdio::piped())
         .spawn()?;
 
-    // Handle stdout
+    const MAX_LINES: usize = 5;
+
     if let Some(stdout) = child.stdout.take() {
         let reader = BufReader::new(stdout);
+        let mut line_buffer: Vec<String> = Vec::new();
+        let mut lines_printed = 0;
 
         for line in reader.lines().map_while(Result::ok) {
-            logger(&line);
+            line_buffer.push(line);
+            if line_buffer.len() > MAX_LINES {
+                line_buffer.remove(0);
+            }
+
+            // Clear previous output
+            if lines_printed > 0 {
+                print!("\x1b[{}A\x1b[J", lines_printed);
+            }
+
+            for buffered_line in &line_buffer {
+                logger(buffered_line);
+            }
+
+            lines_printed = line_buffer.len();
         }
     }
 
-    // Handle stderr
     if let Some(stderr) = child.stderr.take() {
         let reader = BufReader::new(stderr);
 

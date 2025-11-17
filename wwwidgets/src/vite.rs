@@ -187,7 +187,7 @@ pub fn init(config: &Config) -> Result<(), Box<dyn Error>> {
     util::spawn_capture(
         format!("cd {} && yarn && yarn format", local_dir.display()),
         |l| {
-            println!("{}", l.dim());
+            println!("=> {}", l.dim());
         },
     )?;
 
@@ -196,7 +196,7 @@ pub fn init(config: &Config) -> Result<(), Box<dyn Error>> {
         thread::spawn(move || {
             if let Err(e) =
                 util::spawn_capture(format!("cd {} && yarn dev", local_dir.display()), |l| {
-                    println!("{}", l.dim());
+                    println!("=> {}", l.dim());
                 })
             {
                 error!("Failed to start vite dev server: {}", e);
@@ -206,7 +206,7 @@ pub fn init(config: &Config) -> Result<(), Box<dyn Error>> {
         wait_for_vite_server()?;
     } else {
         util::spawn_capture(format!("cd {} && yarn build", local_dir.display()), |l| {
-            println!("{}", l.dim());
+            println!("=> {}", l.dim());
         })?;
     }
     Ok(())

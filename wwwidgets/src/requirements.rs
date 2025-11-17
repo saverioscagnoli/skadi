@@ -77,7 +77,7 @@ impl Distro {
 
 fn install_node(distro: &Distro) -> Result<(), Box<dyn Error>> {
     util::spawn_capture(distro.install_node(), |l| {
-        println!("{}", l.dim());
+        println!("=> {}", l.dim());
     })?;
 
     Ok(())
@@ -85,7 +85,7 @@ fn install_node(distro: &Distro) -> Result<(), Box<dyn Error>> {
 
 fn install_yarn() -> Result<(), Box<dyn Error>> {
     util::spawn_capture("sudo npm i -g yarn", |l| {
-        println!("{}", l.dim());
+        println!("=> {}", l.dim());
     })?;
 
     Ok(())
