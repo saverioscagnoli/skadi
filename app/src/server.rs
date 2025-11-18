@@ -1,35 +1,32 @@
 use crate::window::{WindowAction, WindowActionRequest};
 use axum::{
     Router,
-    extract::{Json, Path, State},
+    extract::{ConnectInfo, Json, Path, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
 };
+use fastwebsockets::{
+    FragmentCollector, Frame, OpCode, Payload, WebSocket, WebSocketError, upgrade,
+};
 use serde::{Deserialize, Serialize};
-use std::error::Error;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::{collections::HashMap, error::Error};
 use std::{collections::HashSet, path::PathBuf};
-use tokio::net::TcpListener;
-use tokio::sync::oneshot;
+use std::{env::consts::ARCH, net::SocketAddr};
+use tokio::sync::{mpsc, oneshot};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     sync::Mutex,
 };
+use tokio::{net::TcpListener, sync::RwLock};
 use tokio::{process::Command, sync::mpsc::UnboundedSender};
 use tower_http::{
     cors::{self, CorsLayer},
     services::ServeDir,
 };
 use traccia::{debug, error, info, warn};
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ListenBody {
-    pub script: String,
-    pub args: Vec<String>,
-    pub widget_label: String,
-}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct WindowActionHandlerBody {
@@ -40,6 +37,7 @@ pub struct WindowActionHandlerBody {
 #[derive(Clone)]
 pub struct AppState {
     pub window_tx: UnboundedSender<WindowActionRequest>,
+    pub websocket_senders: Arc<RwLock<HashMap<String, UnboundedSender<String>>>>,
     /// The hash set consists of [widget_label+command_name+command_args]
     /// Concatenate them so we don't have to use a HashMap<String, Vec<String>>
     pub active_commands: Arc<Mutex<HashSet<String>>>,
@@ -55,14 +53,14 @@ pub async fn start_server(
 
     let app_state = AppState {
         window_tx,
+        websocket_senders: Arc::new(RwLock::new(HashMap::new())),
         active_commands: Arc::new(Mutex::new(HashSet::new())),
     };
 
     let app = Router::new()
         .route("/healthcheck", get(healthcheck))
         .route("/exec", post(exec))
-        .route("/listen", post(listen))
-        .route("/window/{action}", post(window_action_handler))
+        .route("/ws", get(websocket_handler))
         .layer(cors)
         .with_state(app_state)
         .fallback_service(ServeDir::new(&root_dir));
@@ -77,7 +75,11 @@ pub async fn start_server(
         return Err("Failed to send ready signal.".into());
     }
 
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -143,89 +145,114 @@ async fn exec(Json(payload): Json<ExecRequest>) -> impl IntoResponse {
     }
 }
 
-pub async fn listen(State(app_state): State<AppState>, Json(body): Json<ListenBody>) {
-    let set_key = format!(
-        "{}{}{}",
-        body.widget_label,
-        body.script,
-        body.args.join(" ")
-    );
+async fn websocket_handler(
+    ws: upgrade::IncomingUpgrade,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(app_state): State<AppState>,
+) -> impl IntoResponse {
+    debug!("WebSocket connection from: {}", addr);
 
-    // Check if this listener is already active
-    {
-        let mut widget_commands = app_state.active_commands.lock().await;
-
-        if widget_commands.contains(&set_key) {
-            warn!(
-                "Ignoring duplicate listener request for widget {} with script: {} {:?} (this is normal if you have multiple instances of the widget)",
-                &body.widget_label, &body.script, &body.args
-            );
-
-            return;
-        }
-
-        let set_key = set_key.clone();
-        widget_commands.insert(set_key);
-    }
-
-    let widget_label = body.widget_label.clone();
-    let event_name = format!("{} {}", &body.script, &body.args.join(" "));
-    let window_tx = app_state.window_tx.clone();
+    let (response, fut) = ws.upgrade().unwrap();
 
     tokio::spawn(async move {
-        info!(
-            "{} is listening to: {} {:?}",
-            widget_label, event_name, &body.args
-        );
+        if let Err(e) = client_handler(fut, app_state, addr.to_string()).await {
+            error!("Error handling websocket from {}: {}", addr, e);
+        } else {
+            debug!("WebSocket connection closed: {}", addr);
+        }
+    });
 
-        let mut child = match Command::new(&body.script)
-            .args(&body.args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
-            Ok(child) => child,
-            Err(e) => {
-                error!("Failed to spawn command: {}", e);
-                return;
+    response
+}
+
+async fn read_frame<'a>(frame: Frame<'a>, ws: &WebSocket<String>) -> Result<u8, WebSocketError> {
+    match frame.opcode {
+        OpCode::Close => return Ok(1),
+        OpCode::Text => {
+            let text = String::from_utf8(frame.payload.to_vec()).unwrap();
+            let parts = text.split_whitespace().collect::<Vec<_>>();
+
+            if parts.is_empty() {
+                error!("Received an empty message");
             }
-        };
 
-        let stdout = child.stdout.take().expect("Failed to capture stdout");
-        let mut reader = BufReader::new(stdout).lines();
+            match parts[0] {
+                "IDENTIFY" => {}
+                "SEND" => {}
+                p => {
+                    error!("Received unknown protocol part: {}", p);
+                    return Ok(1);
+                }
+            }
 
-        while let Ok(Some(line)) = reader.next_line().await {
-            let action = WindowActionRequest {
-                target: widget_label.clone(),
-                action: WindowAction::DispatchEvent(event_name.clone(), line),
+            if parts.is_empty() {
+                warn!("Received an empty command. Did you use a listen hook with empty args?");
+            }
+
+            let command = vec[0];
+            let args = vec.iter().skip(1).collect::<Vec<_>>();
+            let mut child = match Command::new(&command)
+                .args(&args)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    error!("Failed to spawn command: {}", e);
+                    return Ok(1);
+                }
             };
 
-            if window_tx.send(action).is_err() {
-                error!("Failed to send event, receiver dropped");
-                break;
+            let Some(stdout) = child.stdout.take() else {
+                error!("Failed to take stdout");
+                return Ok(1);
+            };
+            let mut reader = BufReader::new(stdout).lines();
+
+            while let Ok(Some(line)) = reader.next_line().await {
+                let payload = Payload::Borrowed(line.as_bytes());
+                ws.write_frame(Frame::text(payload)).await?;
             }
         }
 
-        match child.wait_with_output().await {
-            Ok(output) => {
-                debug!(
-                    "Listener finished.\nstdout: {}\nstderr: {}",
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr)
-                );
+        _ => {}
+    }
+
+    Ok(0)
+}
+
+async fn client_handler(
+    fut: upgrade::UpgradeFut,
+    app_state: AppState,
+    addr: String,
+) -> Result<(), WebSocketError> {
+    let mut ws = FragmentCollector::new(fut.await?);
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+
+    loop {
+        tokio::select! {
+            Some(message) = rx.recv() => {
+                let payload = Payload::Borrowed(message.as_bytes());
+
+                if let Err(e) = ws.write_frame(Frame::text(payload)).await {
+                    error!("Failed to send via socket: {}", e);
+                }
             }
-            Err(e) => error!("Error waiting for command: {}", e),
+
+            frame_result = ws.read_frame() => {
+                let frame = frame_result?;
+
+                match read_frame(frame, &ws).await {
+                    Ok(_) => continue,
+                    Err(e) => {
+                        error!("Websocket error: {}",e);
+                        continue;
+                    }
+                }
+            }
         }
-
-        // Remove this listener from active set when it finishes
-        let mut widget_commands = app_state.active_commands.lock().await;
-
-        widget_commands.remove(&set_key);
-        debug!(
-            "Listener removed for widget: {} with script: {} {:?}",
-            &body.widget_label, &body.script, &body.args
-        );
-    });
+    }
 }
 
 pub async fn window_action_handler(
