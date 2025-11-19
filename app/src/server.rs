@@ -6,20 +6,19 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use fastwebsockets::{
-    FragmentCollector, Frame, OpCode, Payload, WebSocket, WebSocketError, upgrade,
-};
+use fastwebsockets::{FragmentCollector, Frame, OpCode, Payload, WebSocketError, upgrade};
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::{collections::HashMap, error::Error};
 use std::{collections::HashSet, path::PathBuf};
-use std::{env::consts::ARCH, net::SocketAddr};
 use tokio::sync::{mpsc, oneshot};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     sync::Mutex,
 };
+
 use tokio::{net::TcpListener, sync::RwLock};
 use tokio::{process::Command, sync::mpsc::UnboundedSender};
 use tower_http::{
@@ -34,10 +33,32 @@ pub struct WindowActionHandlerBody {
     pub target_label: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct CommandOutput {
+    pub success: bool,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExecRequest {
+    command: String,
+    args: Vec<String>,
+    widget_label: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebsocketStreamMessage {
+    pub stream_id: String,
+    pub data: String,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub window_tx: UnboundedSender<WindowActionRequest>,
-    pub websocket_senders: Arc<RwLock<HashMap<String, UnboundedSender<String>>>>,
+    pub websocket_senders: Arc<RwLock<HashMap<String, UnboundedSender<WebsocketStreamMessage>>>>,
     /// The hash set consists of [widget_label+command_name+command_args]
     /// Concatenate them so we don't have to use a HashMap<String, Vec<String>>
     pub active_commands: Arc<Mutex<HashSet<String>>>,
@@ -87,27 +108,14 @@ pub async fn healthcheck() -> impl IntoResponse {
     (StatusCode::OK, "OK")
 }
 
-#[derive(Deserialize)]
-struct ExecRequest {
-    command: String,
-    args: Vec<String>,
-}
-
-#[derive(Serialize)]
-struct ExecMessage {
-    success: bool,
-    stdout: String,
-    stderr: String,
-}
-
-async fn exec(Json(payload): Json<ExecRequest>) -> impl IntoResponse {
+async fn exec(Json(body): Json<ExecRequest>) -> impl IntoResponse {
     info!(
-        "Executing command: {} {:?}",
-        &payload.command, &payload.args
+        "Widget '{}' requested execution: {} {:?}",
+        &body.widget_label, &body.command, &body.args
     );
 
-    let output = Command::new(&payload.command)
-        .args(&payload.args)
+    let output = Command::new(&body.command)
+        .args(&body.args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
@@ -119,28 +127,24 @@ async fn exec(Json(payload): Json<ExecRequest>) -> impl IntoResponse {
             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
-            let response = ExecMessage {
+            Json(CommandOutput {
                 success,
                 stdout,
                 stderr,
-            };
-
-            Json(response)
+            })
         }
 
         Err(e) => {
             warn!(
-                "Command {} {:?} failed: {}",
-                &payload.command, &payload.args, e
+                "Widget '{}' execution request {} {:?} failed: {}",
+                &body.widget_label, &body.command, &body.args, e
             );
 
-            let response = ExecMessage {
+            Json(CommandOutput {
                 success: false,
                 stdout: String::new(),
                 stderr: e.to_string(),
-            };
-
-            Json(response)
+            })
         }
     }
 }
@@ -151,11 +155,10 @@ async fn websocket_handler(
     State(app_state): State<AppState>,
 ) -> impl IntoResponse {
     debug!("WebSocket connection from: {}", addr);
-
     let (response, fut) = ws.upgrade().unwrap();
 
     tokio::spawn(async move {
-        if let Err(e) = client_handler(fut, app_state, addr.to_string()).await {
+        if let Err(e) = client_handler(fut, app_state).await {
             error!("Error handling websocket from {}: {}", addr, e);
         } else {
             debug!("WebSocket connection closed: {}", addr);
@@ -165,94 +168,185 @@ async fn websocket_handler(
     response
 }
 
-async fn read_frame<'a>(frame: Frame<'a>, ws: &WebSocket<String>) -> Result<u8, WebSocketError> {
-    match frame.opcode {
-        OpCode::Close => return Ok(1),
-        OpCode::Text => {
-            let text = String::from_utf8(frame.payload.to_vec()).unwrap();
-            let parts = text.split_whitespace().collect::<Vec<_>>();
-
-            if parts.is_empty() {
-                error!("Received an empty message");
-            }
-
-            match parts[0] {
-                "IDENTIFY" => {}
-                "SEND" => {}
-                p => {
-                    error!("Received unknown protocol part: {}", p);
-                    return Ok(1);
-                }
-            }
-
-            if parts.is_empty() {
-                warn!("Received an empty command. Did you use a listen hook with empty args?");
-            }
-
-            let command = vec[0];
-            let args = vec.iter().skip(1).collect::<Vec<_>>();
-            let mut child = match Command::new(&command)
-                .args(&args)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-            {
-                Ok(c) => c,
-                Err(e) => {
-                    error!("Failed to spawn command: {}", e);
-                    return Ok(1);
-                }
-            };
-
-            let Some(stdout) = child.stdout.take() else {
-                error!("Failed to take stdout");
-                return Ok(1);
-            };
-            let mut reader = BufReader::new(stdout).lines();
-
-            while let Ok(Some(line)) = reader.next_line().await {
-                let payload = Payload::Borrowed(line.as_bytes());
-                ws.write_frame(Frame::text(payload)).await?;
-            }
-        }
-
-        _ => {}
-    }
-
-    Ok(0)
-}
-
 async fn client_handler(
     fut: upgrade::UpgradeFut,
     app_state: AppState,
-    addr: String,
 ) -> Result<(), WebSocketError> {
     let mut ws = FragmentCollector::new(fut.await?);
-    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    let (tx, mut rx) = mpsc::unbounded_channel::<WebsocketStreamMessage>();
+    let mut label: Option<String> = None;
+    let mut spawned_tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
-    loop {
+    let result = loop {
         tokio::select! {
             Some(message) = rx.recv() => {
-                let payload = Payload::Borrowed(message.as_bytes());
+                let stringified = serde_json::to_string(&message)
+                    .expect("If this fails I'll kill myself");
+                let payload = Payload::Borrowed(stringified.as_bytes());
 
                 if let Err(e) = ws.write_frame(Frame::text(payload)).await {
                     error!("Failed to send via socket: {}", e);
+                    break Err(e.into());
                 }
             }
 
             frame_result = ws.read_frame() => {
-                let frame = frame_result?;
+                let frame = match frame_result {
+                    Ok(f) => f,
+                    Err(e) => break Err(e),
+                };
 
-                match read_frame(frame, &ws).await {
-                    Ok(_) => continue,
-                    Err(e) => {
-                        error!("Websocket error: {}",e);
-                        continue;
+                match frame.opcode {
+                    OpCode::Close => break Ok(()),
+                    OpCode::Text => {
+                        let text = match String::from_utf8(frame.payload.to_vec()) {
+                            Ok(t) => t,
+                            Err(e) => {
+                                error!("Invalid UTF-8 in message: {}", e);
+                                continue;
+                            }
+                        };
+                        let parts = text.split_whitespace().collect::<Vec<_>>();
+
+                        if parts.is_empty() {
+                            error!("Received an empty message");
+                            continue;
+                        }
+
+                        match parts[0] {
+                            // The identification is only required
+                            // for sending messages from a socket to another.
+                            // For example, when a user wants to open/close a widget from another widget.
+                            "IDENTIFY" => {
+                                let Some(new_label) = parts.get(1) else {
+                                    error!("Trying to identify without a label");
+                                    continue;
+                                };
+
+                                if let Some(old_label) = label.take() {
+                                    let mut lock = app_state.websocket_senders.write().await;
+                                    lock.remove(&old_label);
+                                }
+
+                                let mut lock = app_state.websocket_senders.write().await;
+                                lock.insert(new_label.to_string(), tx.clone());
+                                label = Some(new_label.to_string());
+                                debug!("Identified client with label: {}", new_label);
+                            }
+
+                            "EXECUTE" => {
+                                let Some(command) = parts.get(1) else {
+                                    error!("Received execute signal without a command");
+                                    continue;
+                                };
+
+                                let args = parts.iter().skip(2).copied().collect::<Vec<_>>();
+
+                                debug!("Executing command: {} {:?}", command, args);
+                                let output = match Command::new(command)
+                                    .args(&args)
+                                    .stdout(Stdio::piped())
+                                    .stderr(Stdio::piped())
+                                    .output()
+                                    .await
+                                {
+                                    Ok(c) => c,
+                                    Err(e) => {
+                                        error!("Failed to execute '{} {:?}': {}", command, args, e);
+                                        continue;
+                                    }
+                                };
+
+                                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+                                if !output.status.success() {
+                                    error!("Command '{}' failed with status code {}", command, output.status.code().unwrap_or(-1));
+                                }
+                            }
+
+                            "LISTEN" => {
+                                let Some(stream_id) = parts.get(1) else {
+                                    error!("Received listen signal without a stream ID");
+                                    continue;
+                                };
+                                let stream_id = stream_id.to_string();
+
+                                let Some(command) = parts.get(2) else {
+                                    error!("Received listen signal without a command");
+                                    continue;
+                                };
+
+                                let args = parts.iter().skip(3).copied().collect::<Vec<_>>();
+
+                                debug!("{} is listening to {} {:?}", stream_id, command, args);
+
+                                let mut child = match Command::new(command)
+                                    .args(&args)
+                                    .stdout(Stdio::piped())
+                                    .stderr(Stdio::piped())
+                                    .spawn()
+                                {
+                                    Ok(c) => c,
+                                    Err(e) => {
+                                        error!("Failed to execute '{} {:?}': {}", command, args, e);
+                                        continue;
+                                    }
+                                };
+
+                                let Some(stdout) = child.stdout.take() else {
+                                    error!("Failed to capture stdout for '{} {:?}'", command, args);
+                                    continue;
+                                };
+
+                                let tx_clone = tx.clone();
+                                let handle = tokio::spawn(async move {
+                                    let mut stdout_reader = BufReader::new(stdout).lines();
+
+                                    loop {
+                                        tokio::select! {
+                                            Ok(Some(line)) = stdout_reader.next_line() => {
+                                                let message = WebsocketStreamMessage {
+                                                    stream_id: stream_id.to_string(),
+                                                    data: line,
+                                                };
+
+                                                if tx_clone.send(message).is_err() {
+                                                    break;
+                                                }
+                                            }
+                                            else => break,
+                                        }
+                                    }
+
+                                    let _ = child.wait().await;
+                                });
+
+                                spawned_tasks.push(handle);
+                            }
+
+                            p => {
+                                error!("Received unknown protocol part: {}", p);
+                            }
+                        }
                     }
+
+                    _ => {}
                 }
             }
         }
+    };
+
+    if let Some(label) = label {
+        let mut lock = app_state.websocket_senders.write().await;
+        lock.remove(&label);
     }
+
+    for handle in spawned_tasks {
+        handle.abort();
+    }
+
+    result
 }
 
 pub async fn window_action_handler(
