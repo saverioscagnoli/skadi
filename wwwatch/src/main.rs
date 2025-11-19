@@ -120,55 +120,52 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Listen for events
     for event in events.map_while(Result::ok) {
-        match event {
-            Event::Workspace(ws_event) => match ws_event.change {
-                WorkspaceChange::Focus => {
-                    if let Some(current_ws) = ws_event.current
-                        && let Some(name) = current_ws.name
-                    {
-                        let num = current_ws.num.unwrap_or(-1);
-                        workspace_cache.insert((num, name.clone()));
-                        current_workspace = name;
-                    }
-
-                    // Sort workspaces by num
-                    let mut sorted_workspaces: Vec<_> = workspace_cache.iter().cloned().collect();
-                    sorted_workspaces.sort_by_key(|(num, _)| *num);
-
-                    let payload = WorkspacePayload {
-                        op: Op::Workspaces,
-                        current: &current_workspace,
-                        total: &sorted_workspaces,
-                    };
-
-                    println!("{}", serde_json::to_string(&payload)?);
+        if let Event::Workspace(ws_event) = event { match ws_event.change {
+            WorkspaceChange::Focus => {
+                if let Some(current_ws) = ws_event.current
+                    && let Some(name) = current_ws.name
+                {
+                    let num = current_ws.num.unwrap_or(-1);
+                    workspace_cache.insert((num, name.clone()));
+                    current_workspace = name;
                 }
 
-                WorkspaceChange::Empty => {
-                    if let Some(current_ws) = ws_event.current
-                        && let Some(name) = current_ws.name
-                    {
-                        let num = current_ws.num.unwrap_or(-1);
-                        workspace_cache.remove(&(num, name));
-                    }
+                // Sort workspaces by num
+                let mut sorted_workspaces: Vec<_> = workspace_cache.iter().cloned().collect();
+                sorted_workspaces.sort_by_key(|(num, _)| *num);
 
-                    // Sort workspaces by num
-                    let mut sorted_workspaces: Vec<_> = workspace_cache.iter().cloned().collect();
-                    sorted_workspaces.sort_by_key(|(num, _)| *num);
+                let payload = WorkspacePayload {
+                    op: Op::Workspaces,
+                    current: &current_workspace,
+                    total: &sorted_workspaces,
+                };
 
-                    let payload = WorkspacePayload {
-                        op: Op::Workspaces,
-                        current: &current_workspace,
-                        total: &sorted_workspaces,
-                    };
+                println!("{}", serde_json::to_string(&payload)?);
+            }
 
-                    println!("{}", serde_json::to_string(&payload).unwrap());
+            WorkspaceChange::Empty => {
+                if let Some(current_ws) = ws_event.current
+                    && let Some(name) = current_ws.name
+                {
+                    let num = current_ws.num.unwrap_or(-1);
+                    workspace_cache.remove(&(num, name));
                 }
 
-                _ => {}
-            },
+                // Sort workspaces by num
+                let mut sorted_workspaces: Vec<_> = workspace_cache.iter().cloned().collect();
+                sorted_workspaces.sort_by_key(|(num, _)| *num);
+
+                let payload = WorkspacePayload {
+                    op: Op::Workspaces,
+                    current: &current_workspace,
+                    total: &sorted_workspaces,
+                };
+
+                println!("{}", serde_json::to_string(&payload).unwrap());
+            }
+
             _ => {}
-        }
+        } }
     }
 
     Ok(())

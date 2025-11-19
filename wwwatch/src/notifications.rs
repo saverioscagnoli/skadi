@@ -18,65 +18,64 @@ fn extract_image(
 ) -> Option<PathBuf> {
     // First, try to create a cache key from the image data
     for key in ["image-data", "image_data", "icon_data"] {
-        if let Some(value) = hints.get(key) {
-            if let Value::Structure(s) = value {
-                let fields = s.fields();
+        if let Some(value) = hints.get(key)
+            && let Value::Structure(s) = value
+        {
+            let fields = s.fields();
 
-                let width = if let Some(Value::I32(w)) = fields.get(0) {
-                    *w as u32
-                } else {
-                    continue;
-                };
+            let width = if let Some(Value::I32(w)) = fields.first() {
+                *w as u32
+            } else {
+                continue;
+            };
 
-                let height = if let Some(Value::I32(h)) = fields.get(1) {
-                    *h as u32
-                } else {
-                    continue;
-                };
+            let height = if let Some(Value::I32(h)) = fields.get(1) {
+                *h as u32
+            } else {
+                continue;
+            };
 
-                let has_alpha = if let Some(Value::Bool(a)) = fields.get(3) {
-                    *a
-                } else {
-                    true
-                };
+            let has_alpha = if let Some(Value::Bool(a)) = fields.get(3) {
+                *a
+            } else {
+                true
+            };
 
-                if let Some(Value::Array(arr)) = fields.get(6) {
-                    let bytes: Vec<u8> = arr
-                        .iter()
-                        .filter_map(|v| if let Value::U8(b) = v { Some(*b) } else { None })
-                        .collect();
+            if let Some(Value::Array(arr)) = fields.get(6) {
+                let bytes: Vec<u8> = arr
+                    .iter()
+                    .filter_map(|v| if let Value::U8(b) = v { Some(*b) } else { None })
+                    .collect();
 
-                    // Create a cache key from image dimensions and hash of data
+                // Create a cache key from image dimensions and hash of data
 
-                    let mut hasher = DefaultHasher::new();
+                let mut hasher = DefaultHasher::new();
 
-                    width.hash(&mut hasher);
-                    height.hash(&mut hasher);
-                    bytes.hash(&mut hasher);
+                width.hash(&mut hasher);
+                height.hash(&mut hasher);
+                bytes.hash(&mut hasher);
 
-                    let cache_key = format!("image-data-{}", hasher.finish());
+                let cache_key = format!("image-data-{}", hasher.finish());
 
-                    // Check if we already have this image cached
-                    if let Some(cached_path) = cache.get(&cache_key) {
-                        if cached_path.exists() {
-                            return Some(cached_path.clone());
-                        } else {
-                            // Remove stale cache entry
-                            cache.remove(&cache_key);
-                        }
+                // Check if we already have this image cached
+                if let Some(cached_path) = cache.get(&cache_key) {
+                    if cached_path.exists() {
+                        return Some(cached_path.clone());
+                    } else {
+                        // Remove stale cache entry
+                        cache.remove(&cache_key);
                     }
+                }
 
-                    // Save new image
-                    let file_name =
-                        paths::tmp_dir().join(format!("{}.png", util::random_string(7)));
+                // Save new image
+                let file_name = paths::tmp_dir().join(format!("{}.png", util::random_string(7)));
 
-                    if save_raw_as_png(&file_name, width, height, &bytes, has_alpha).is_ok() {
-                        let path = PathBuf::from(file_name);
+                if save_raw_as_png(&file_name, width, height, &bytes, has_alpha).is_ok() {
+                    let path = file_name;
 
-                        cache.insert(cache_key, path.clone());
+                    cache.insert(cache_key, path.clone());
 
-                        return Some(path);
-                    }
+                    return Some(path);
                 }
             }
         }
@@ -110,7 +109,7 @@ fn extract_image(
                     paths::tmp_dir().join(format!("{}.{}", util::random_string(7), ext));
 
                 if fs::write(&file_name, bytes).is_ok() {
-                    let path = PathBuf::from(file_name);
+                    let path = file_name;
 
                     cache.insert(cache_key, path.clone());
 
@@ -155,6 +154,7 @@ struct Notifications {
 
 #[interface(name = "org.freedesktop.Notifications")]
 impl Notifications {
+    #[allow(clippy::too_many_arguments)]
     fn notify(
         &mut self,
         app_name: &str,

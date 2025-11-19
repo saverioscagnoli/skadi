@@ -123,7 +123,7 @@ pub fn generate_indices<P: AsRef<Path>>(config: &Config, root: P) -> Result<(), 
 
         if let Err(e) = std::fs::write(
             root.join("index.css"),
-            Templates::css_index(&paths::config_dir()),
+            Templates::css_index(paths::config_dir()),
         ) {
             error!(
                 "Could not write index.css to {}: {}",

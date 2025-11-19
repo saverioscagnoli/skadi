@@ -36,14 +36,14 @@ fn get_cpu_temp() -> Option<f32> {
 
                 if label.contains("cpu") || label.contains("core") || label.contains("k10temp") {
                     // Read temperature value
-                    if let Ok(raw) = std::fs::read_to_string(&temp_path) {
-                        if let Ok(val) = raw.trim().parse::<f32>() {
-                            // Usually in millidegrees
-                            if val > 1000.0 {
-                                return Some(val / 1000.0);
-                            } else {
-                                return Some(val);
-                            }
+                    if let Ok(raw) = std::fs::read_to_string(&temp_path)
+                        && let Ok(val) = raw.trim().parse::<f32>()
+                    {
+                        // Usually in millidegrees
+                        if val > 1000.0 {
+                            return Some(val / 1000.0);
+                        } else {
+                            return Some(val);
                         }
                     }
                 }
@@ -119,7 +119,7 @@ pub fn query_info(cpu: bool, mem: bool, disk: bool, network: bool, interval_ms: 
                     cores.push(CoreInfo { usage, freq });
                 }
 
-                avg_freq = avg_freq / cpus.len() as f32;
+                avg_freq /= cpus.len() as f32;
 
                 let payload = CpuPayload {
                     usage: system.global_cpu_usage(),

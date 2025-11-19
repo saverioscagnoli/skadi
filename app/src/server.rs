@@ -180,7 +180,7 @@ async fn client_handler(
 
                 if let Err(e) = ws.write_frame(Frame::text(payload)).await {
                     error!("Failed to send via socket: {}", e);
-                    break Err(e.into());
+                    break Err(e);
                 }
             }
 
