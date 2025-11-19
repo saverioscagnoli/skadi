@@ -33,6 +33,7 @@ pub struct WindowActionRequest {
 
 pub struct Window {
     pub gtk_window: gtk4::ApplicationWindow,
+    #[allow(unused)]
     pub webview: WebView,
     pub id: u32,
     #[allow(unused)]

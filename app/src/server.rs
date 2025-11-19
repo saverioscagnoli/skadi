@@ -18,7 +18,6 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader},
     sync::Mutex,
 };
-
 use tokio::{net::TcpListener, sync::RwLock};
 use tokio::{process::Command, sync::mpsc::UnboundedSender};
 use tower_http::{
@@ -55,7 +54,7 @@ pub struct AppState {
     pub websocket_senders: Arc<RwLock<HashMap<String, UnboundedSender<WebsocketStreamMessage>>>>,
     /// The hash set consists of [widget_label+command_name+command_args]
     /// Concatenate them so we don't have to use a HashMap<String, Vec<String>>
-    pub active_commands: Arc<Mutex<HashSet<String>>>,
+    pub active_commands: Arc<Mutex<HashSet<Arc<String>>>>,
 }
 
 pub async fn start_server(
@@ -226,7 +225,7 @@ async fn client_handler(
                                 let mut lock = app_state.websocket_senders.write().await;
                                 lock.insert(new_label.to_string(), tx.clone());
                                 label = Some(new_label.to_string());
-                                debug!("Identified client with label: {}", new_label);
+                                debug!("Identified client with label '{}'", new_label);
                             }
 
                             "LISTEN" => {
@@ -242,7 +241,16 @@ async fn client_handler(
                                 };
 
                                 let args = parts.iter().skip(3).copied().collect::<Vec<_>>();
-                                debug!("{} is listening to {} {:?}", stream_id, command, args);
+                                debug!("Stream '{}'  is listening to {} {:?}", stream_id, command, args);
+
+                                let mut lock = app_state.active_commands.lock().await;
+
+                                if lock.contains(&*stream_id) {
+                                    warn!("Stopping duplicate stream '{}' (This is normal if you are in --dev mode)", &stream_id);
+                                    continue;
+                                } else {
+                                    lock.insert(Arc::clone(&stream_id));
+                                }
 
                                 let mut child = match Command::new(command)
                                     .args(&args)
@@ -273,7 +281,14 @@ async fn client_handler(
                                                     stream_id: Arc::clone(&stream_id),
                                                     data: line,
                                                 };
-                                                debug!("Sending {} to stream {}", message.data, message.stream_id);
+
+                                                let display_data = if message.data.len() > 100 {
+                                                    format!("{}... ({} bytes)", &message.data[..100], message.data.len())
+                                                } else {
+                                                    message.data.clone()
+                                                };
+
+                                                debug!("Sending {} to stream '{}'", display_data, message.stream_id);
 
                                                 if tx_clone.send(message).is_err() {
                                                     break;
@@ -287,6 +302,21 @@ async fn client_handler(
                                 });
 
                                 spawned_tasks.push(handle);
+                            }
+
+                            "STOP_STREAM" => {
+                                let Some(stream_id) = parts.get(1).map(|s| s.to_string()) else {
+                                    error!("Received STOP_STREAM without stream ID");
+                                    continue;
+                                };
+
+                                let mut senders_lock = app_state.websocket_senders.write().await;
+                                senders_lock.remove(&stream_id);
+
+                               let mut commands_lock = app_state.active_commands.lock().await;
+                               commands_lock.remove(&stream_id);
+
+                                warn!("Stopped stream '{}'", stream_id);
                             }
 
                             p => {

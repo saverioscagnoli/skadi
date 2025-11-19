@@ -8,7 +8,7 @@ use crate::{
 };
 use common::{config::Config, util};
 use gtk4::gio::{ApplicationFlags, prelude::*};
-use std::{cell::RefCell, collections::HashMap, error::Error, rc::Rc, time::Duration};
+use std::{cell::RefCell, collections::HashMap, error::Error, rc::Rc};
 use tokio::sync::mpsc::UnboundedReceiver;
 use traccia::{debug, warn};
 
