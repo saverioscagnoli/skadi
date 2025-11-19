@@ -8,9 +8,9 @@ use crate::{
 };
 use common::{config::Config, util};
 use gtk4::gio::{ApplicationFlags, prelude::*};
-use std::{cell::RefCell, error::Error, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, error::Error, rc::Rc};
 use tokio::sync::mpsc::UnboundedReceiver;
-use traccia::debug;
+use traccia::{debug, warn};
 
 pub use server::start_server;
 
@@ -26,50 +26,50 @@ pub fn setup_widgets(
 
         let factory = WidgetFactory::new(app);
         let widgets = factory.create_widgets(&config, config.port);
+        let mut widget_map: HashMap<String, Vec<usize>> = HashMap::new();
+
+        for (idx, widget) in widgets.iter().enumerate() {
+            widget_map.insert(widget.config.label.clone(), vec![idx]);
+        }
+
         let widgets = Rc::new(widgets);
+        let widget_map = Rc::new(widget_map);
 
         if let Some(mut recv) = window_rx.borrow_mut().take() {
             let widgets = Rc::clone(&widgets);
+            let widget_map = Rc::clone(&widget_map);
 
             gtk4::glib::spawn_future_local(async move {
-                loop {
-                    while let Some(event) = recv.recv().await {
-                        debug!("Handling window action: {:?}", event.action);
+                while let Some(event) = recv.recv().await {
+                    debug!("Handling window action: {:?}", event.action);
 
-                        match event.action {
-                            WindowAction::DispatchEvent(name, payload) => {
-                                for widget in widgets.iter() {
-                                    if widget.config.label == event.target {
-                                        for window in &widget.windows {
-                                            window.dispatch(&name, &payload);
-                                        }
-                                    }
-                                }
+                    if let Some(indices) = widget_map.get(&event.target_label) {
+                        for &idx in indices {
+                            let widget = &widgets[idx];
+
+                            if widget.windows.is_empty() {
+                                continue;
                             }
 
-                            WindowAction::Show => {
-                                for widget in widgets.iter() {
-                                    if widget.config.label == event.target {
-                                        for window in &widget.windows {
-                                            window.show();
-                                        }
+                            match event.action {
+                                WindowAction::Show => {
+                                    for window in &widget.windows {
+                                        window.show();
                                     }
                                 }
-                            }
-
-                            WindowAction::Hide => {
-                                for widget in widgets.iter() {
-                                    debug!("{} {}", widget.config.label, event.target);
-                                    if widget.config.label == event.target {
-                                        for window in &widget.windows {
-                                            window.hide();
-                                        }
+                                WindowAction::Hide => {
+                                    for window in &widget.windows {
+                                        window.hide();
                                     }
                                 }
                             }
                         }
+                    } else {
+                        debug!("Widget with label '{}' not found", event.target_label);
                     }
                 }
+
+                warn!("Receiver stopped. wtf?");
             });
         }
     });

@@ -285,22 +285,26 @@ impl Widget {
                 window.set_anchor(gtk4_layer_shell::Edge::Right, true);
             }
 
-            let window = Window {
-                gtk_window: window,
-                webview,
-                id: i as u32,
-                monitor_id: monitor
-                    .connector()
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| format!("Monitor {}", i)),
-            };
+            let initial_visibility = !config.hidden;
 
             if config.hidden {
                 debug!("Widget '{}' starts hidden", config.label);
                 window.hide();
             } else {
                 window.show();
+                window.present();
             }
+
+            let window = Window::new(
+                window,
+                webview,
+                i as u32,
+                monitor
+                    .connector()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("Monitor {}", i)),
+                initial_visibility,
+            );
 
             windows.push(window);
         }

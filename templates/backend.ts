@@ -1,15 +1,16 @@
 import { useEffect } from "react";
 
-type BackendMessage = {
+type CommandOutput = {
   success: boolean;
   stdout: string;
   stderr: string;
 };
 
-async function exec(
-  command: string,
-  args: string[] = [],
-): Promise<BackendMessage> {
+// For single exec request, don't use websockets
+// just for simplcity, use post requests.
+// They're more than enough for this use case
+
+async function exec(command: string, args?: string[]): Promise<CommandOutput> {
   try {
     let response = await fetch("/exec", {
       method: "POST",
@@ -18,110 +19,138 @@ async function exec(
       },
       body: JSON.stringify({
         command,
-        args,
+        args: args || [],
+        widgetLabel: document.title,
       }),
     });
 
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
     return await response.json();
   } catch (err) {
-    console.error("Failed to contact backend:", err.message);
-
+    console.error(
+      "Request failed. The return output is the http error, not the command stderr.",
+    );
     return {
       success: false,
       stdout: "",
-      stderr: "",
+      stderr: err.message,
     };
   }
 }
 
-function useListen<T>(
-  script: string,
+// For streaming, use websockets.
+// This may be overkill, but using js evaluation in the backend
+// for dispatching events kept causing problems and generally not
+// suitable for faster streams.
+
+let websocket: WebSocket | null = null;
+let websocketRefCount = 0;
+let streamIdCounter = 0;
+
+// Map of stream ID to callback
+const streamCallbacks = new Map<string, (line: string) => void>();
+
+// Websocket singleton
+function getWebsocket(): WebSocket {
+  if (!websocket || websocket.readyState === WebSocket.CLOSED) {
+    websocket = new WebSocket("ws://localhost:10978/ws");
+
+    websocket.addEventListener("open", () => {
+      websocket!.send(`IDENTIFY ${document.title}`);
+    });
+
+    websocket.addEventListener("message", (event) => {
+      try {
+        const message = JSON.parse(event.data);
+
+        if (message.streamId && streamCallbacks.has(message.streamId)) {
+          const callback = streamCallbacks.get(message.streamId)!;
+          callback(message.data);
+        }
+      } catch (err) {
+        console.error("Failed to parse WebSocket message:", err);
+      }
+    });
+
+    websocket.addEventListener("error", (error) => {
+      console.error("WebSocket error:", error);
+    });
+
+    websocket.addEventListener("close", () => {
+      console.log("WebSocket connection closed");
+    });
+  }
+
+  websocketRefCount++;
+  return websocket;
+}
+
+function releaseWebsocket() {
+  websocketRefCount--;
+  if (websocketRefCount === 0 && websocket) {
+    websocket.close();
+    websocket = null;
+  }
+}
+
+function useListen(
+  command: string,
   args: string[],
-  callback: (payload: T) => void,
+  callback: (line: string) => void,
 ) {
   useEffect(() => {
-    let ctrl = new AbortController();
+    const streamId = `stream_${++streamIdCounter}_${Date.now()}`;
 
-    // Start listening on the backend
-    fetch("/listen", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        script,
-        args,
-        // Get the widget label from the document
-        // (See common/src/)
-        widget_label: document.title,
-      }),
-    })
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-      })
-      .catch((error) => {
-        console.error("Failed to start listening:", error);
-      });
+    streamCallbacks.set(streamId, callback);
 
-    // Set up event listener with unique event name that includes args
-    let eventName = args.length > 0 ? `${script} ${args.join(" ")}` : script;
-    console.log(eventName);
-    // @ts-ignore
-    window.addEventListener(
-      eventName,
-      (e: CustomEvent<T>) => callback(e.detail),
-      {
-        signal: ctrl.signal,
-      },
-    );
+    const ws = getWebsocket();
+
+    const startStream = () => {
+      ws.send(`LISTEN ${streamId} ${command} ${args?.join(" ") || ""}`);
+    };
+
+    if (ws.readyState === WebSocket.OPEN) {
+      startStream();
+    } else {
+      ws.addEventListener("open", startStream, { once: true });
+    }
 
     return () => {
-      ctrl.abort();
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(`STOP_STREAM ${streamId}`);
+      }
+
+      streamCallbacks.delete(streamId);
+      releaseWebsocket();
     };
   }, []);
 }
 
-const windowHandle = {
-  show: async (label: string = document.title) => {
-    try {
-      let response = await fetch("/window/show", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          target_label: label,
-        }),
-      });
+// Using websockets for window actions
+// would be quite useless, since the actual logic
+// for the window action (show, hide, etc.) is handled
+// in the backend on the main gtk thread
+async function sendWindowAction(
+  action: string,
+  label: string = document.title,
+) {
+  try {
+    await fetch(`/window/${label}/${action}`);
+  } catch (err) {
+    console.error("Failed to send window action:", err);
+  }
+}
 
-      if (!response.ok) {
-        console.error(`Failed to show window: ${response.status}`);
-      }
-    } catch (err) {
-      console.error("Failed to show window", err.message);
-    }
+const win = {
+  show: async (label: string = document.title) => {
+    await sendWindowAction("show", label);
   },
   hide: async (label: string = document.title) => {
-    try {
-      let response = await fetch("/window/hide", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          target_label: label,
-        }),
-      });
-
-      if (!response.ok) {
-        console.error(`Failed to hide window: ${response.status}`);
-      }
-    } catch (err) {
-      console.error("Failed to hide window", err.message);
-    }
+    await sendWindowAction("hide", label);
   },
 };
 
-export { exec, useListen, windowHandle as window };
+export { exec, useListen, win };

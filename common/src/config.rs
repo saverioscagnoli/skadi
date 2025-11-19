@@ -1,3 +1,4 @@
+use crate::templates::Templates;
 use core::fmt;
 use gtk4_layer_shell::LayerShell;
 use serde::{
@@ -6,8 +7,6 @@ use serde::{
 };
 use std::{error::Error, path::PathBuf};
 use traccia::{debug, info};
-
-use crate::templates::Templates;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Dimension {
