@@ -27,12 +27,6 @@ use tower_http::{
 };
 use traccia::{debug, error, info, warn};
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct WindowActionHandlerBody {
-    /// The label of the widget
-    pub target_label: String,
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct CommandOutput {
     pub success: bool,
@@ -51,7 +45,7 @@ struct ExecRequest {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WebsocketStreamMessage {
-    pub stream_id: String,
+    pub stream_id: Arc<String>,
     pub data: String,
 }
 
@@ -82,6 +76,7 @@ pub async fn start_server(
         .route("/healthcheck", get(healthcheck))
         .route("/exec", post(exec))
         .route("/ws", get(websocket_handler))
+        .route("/window/{label}/{action}", get(window_handler))
         .layer(cors)
         .with_state(app_state)
         .fallback_service(ServeDir::new(&root_dir));
@@ -234,43 +229,12 @@ async fn client_handler(
                                 debug!("Identified client with label: {}", new_label);
                             }
 
-                            "EXECUTE" => {
-                                let Some(command) = parts.get(1) else {
-                                    error!("Received execute signal without a command");
-                                    continue;
-                                };
-
-                                let args = parts.iter().skip(2).copied().collect::<Vec<_>>();
-
-                                debug!("Executing command: {} {:?}", command, args);
-                                let output = match Command::new(command)
-                                    .args(&args)
-                                    .stdout(Stdio::piped())
-                                    .stderr(Stdio::piped())
-                                    .output()
-                                    .await
-                                {
-                                    Ok(c) => c,
-                                    Err(e) => {
-                                        error!("Failed to execute '{} {:?}': {}", command, args, e);
-                                        continue;
-                                    }
-                                };
-
-                                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-                                if !output.status.success() {
-                                    error!("Command '{}' failed with status code {}", command, output.status.code().unwrap_or(-1));
-                                }
-                            }
-
                             "LISTEN" => {
-                                let Some(stream_id) = parts.get(1) else {
+                                let Some(stream_id) = parts.get(1).map(|s| s.to_string()) else {
                                     error!("Received listen signal without a stream ID");
                                     continue;
                                 };
-                                let stream_id = stream_id.to_string();
+                                let stream_id = Arc::new(stream_id);
 
                                 let Some(command) = parts.get(2) else {
                                     error!("Received listen signal without a command");
@@ -278,7 +242,6 @@ async fn client_handler(
                                 };
 
                                 let args = parts.iter().skip(3).copied().collect::<Vec<_>>();
-
                                 debug!("{} is listening to {} {:?}", stream_id, command, args);
 
                                 let mut child = match Command::new(command)
@@ -307,9 +270,10 @@ async fn client_handler(
                                         tokio::select! {
                                             Ok(Some(line)) = stdout_reader.next_line() => {
                                                 let message = WebsocketStreamMessage {
-                                                    stream_id: stream_id.to_string(),
+                                                    stream_id: Arc::clone(&stream_id),
                                                     data: line,
                                                 };
+                                                debug!("Sending {} to stream {}", message.data, message.stream_id);
 
                                                 if tx_clone.send(message).is_err() {
                                                     break;
@@ -349,29 +313,14 @@ async fn client_handler(
     result
 }
 
-pub async fn window_action_handler(
+async fn window_handler(
+    Path((label, action)): Path<(String, String)>,
     State(app_state): State<AppState>,
-    Path(payload): Path<String>,
-    Json(body): Json<WindowActionHandlerBody>,
-) -> impl IntoResponse {
-    let action = match payload.as_str() {
-        "show" => WindowAction::Show,
-        "hide" => WindowAction::Hide,
-        _ => {
-            warn!("Received invalid action {}", &payload);
-            return StatusCode::BAD_REQUEST;
-        }
-    };
-
+) {
     let request = WindowActionRequest {
-        target: body.target_label,
-        action,
+        target_label: label,
+        action: WindowAction::from(action),
     };
 
-    if let Err(e) = app_state.window_tx.send(request) {
-        error!("Failed to handle window action: {}", e);
-        return StatusCode::INTERNAL_SERVER_ERROR;
-    }
-
-    StatusCode::OK
+    let _ = app_state.window_tx.send(request);
 }

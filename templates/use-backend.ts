@@ -11,10 +11,10 @@ type ExecFunction = (
   args: string[],
 ) => Promise<BackendMessage>;
 
-type UseListenHook = <T = string>(
+type UseListenHook = (
   script: string,
   args: string[],
-  callback: (data: T) => void,
+  callback: (data: string) => void,
 ) => void;
 
 type WindowHandle = {
@@ -25,7 +25,7 @@ type WindowHandle = {
 type BackendContextType = {
   exec: ExecFunction;
   useListen: UseListenHook;
-  window: WindowHandle;
+  win: WindowHandle;
 };
 
 const BackendContext = createContext<BackendContextType | null>(null);

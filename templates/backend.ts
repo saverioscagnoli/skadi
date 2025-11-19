@@ -129,4 +129,28 @@ function useListen(
   }, []);
 }
 
-export { exec, useListen };
+// Using websockets for window actions
+// would be quite useless, since the actual logic
+// for the window action (show, hide, etc.) is handled
+// in the backend on the main gtk thread
+async function sendWindowAction(
+  action: string,
+  label: string = document.title,
+) {
+  try {
+    await fetch(`/window/${label}/${action}`);
+  } catch (err) {
+    console.error("Failed to send window action:", err);
+  }
+}
+
+const win = {
+  show: async (label: string = document.title) => {
+    await sendWindowAction("show", label);
+  },
+  hide: async (label: string = document.title) => {
+    await sendWindowAction("hide", label);
+  },
+};
+
+export { exec, useListen, win };
