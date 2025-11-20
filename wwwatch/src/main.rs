@@ -70,7 +70,7 @@ enum Op {
     Notification,
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     let mut event_list = Vec::new();
@@ -120,52 +120,54 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Listen for events
     for event in events.map_while(Result::ok) {
-        if let Event::Workspace(ws_event) = event { match ws_event.change {
-            WorkspaceChange::Focus => {
-                if let Some(current_ws) = ws_event.current
-                    && let Some(name) = current_ws.name
-                {
-                    let num = current_ws.num.unwrap_or(-1);
-                    workspace_cache.insert((num, name.clone()));
-                    current_workspace = name;
+        if let Event::Workspace(ws_event) = event {
+            match ws_event.change {
+                WorkspaceChange::Focus => {
+                    if let Some(current_ws) = ws_event.current
+                        && let Some(name) = current_ws.name
+                    {
+                        let num = current_ws.num.unwrap_or(-1);
+                        workspace_cache.insert((num, name.clone()));
+                        current_workspace = name;
+                    }
+
+                    // Sort workspaces by num
+                    let mut sorted_workspaces: Vec<_> = workspace_cache.iter().cloned().collect();
+                    sorted_workspaces.sort_by_key(|(num, _)| *num);
+
+                    let payload = WorkspacePayload {
+                        op: Op::Workspaces,
+                        current: &current_workspace,
+                        total: &sorted_workspaces,
+                    };
+
+                    println!("{}", serde_json::to_string(&payload)?);
                 }
 
-                // Sort workspaces by num
-                let mut sorted_workspaces: Vec<_> = workspace_cache.iter().cloned().collect();
-                sorted_workspaces.sort_by_key(|(num, _)| *num);
+                WorkspaceChange::Empty => {
+                    if let Some(current_ws) = ws_event.current
+                        && let Some(name) = current_ws.name
+                    {
+                        let num = current_ws.num.unwrap_or(-1);
+                        workspace_cache.remove(&(num, name));
+                    }
 
-                let payload = WorkspacePayload {
-                    op: Op::Workspaces,
-                    current: &current_workspace,
-                    total: &sorted_workspaces,
-                };
+                    // Sort workspaces by num
+                    let mut sorted_workspaces: Vec<_> = workspace_cache.iter().cloned().collect();
+                    sorted_workspaces.sort_by_key(|(num, _)| *num);
 
-                println!("{}", serde_json::to_string(&payload)?);
-            }
+                    let payload = WorkspacePayload {
+                        op: Op::Workspaces,
+                        current: &current_workspace,
+                        total: &sorted_workspaces,
+                    };
 
-            WorkspaceChange::Empty => {
-                if let Some(current_ws) = ws_event.current
-                    && let Some(name) = current_ws.name
-                {
-                    let num = current_ws.num.unwrap_or(-1);
-                    workspace_cache.remove(&(num, name));
+                    println!("{}", serde_json::to_string(&payload).unwrap());
                 }
 
-                // Sort workspaces by num
-                let mut sorted_workspaces: Vec<_> = workspace_cache.iter().cloned().collect();
-                sorted_workspaces.sort_by_key(|(num, _)| *num);
-
-                let payload = WorkspacePayload {
-                    op: Op::Workspaces,
-                    current: &current_workspace,
-                    total: &sorted_workspaces,
-                };
-
-                println!("{}", serde_json::to_string(&payload).unwrap());
+                _ => {}
             }
-
-            _ => {}
-        } }
+        }
     }
 
     Ok(())
