@@ -1,5 +1,5 @@
 use crate::{
-    bash::{BashPool, BashProcess},
+    bash::BashPool,
     window::{WindowAction, WindowActionRequest},
 };
 use axum::{
@@ -47,9 +47,7 @@ pub struct WebsocketStreamMessage {
 pub struct AppState {
     pub window_tx: UnboundedSender<WindowActionRequest>,
     pub websocket_senders: Arc<RwLock<HashMap<String, UnboundedSender<WebsocketStreamMessage>>>>,
-    /// The hash set consists of [widget_label+command_name+command_args]
-    /// Concatenate them so we don't have to use a HashMap<String, Vec<String>>
-    pub active_commands: Arc<Mutex<HashSet<Arc<String>>>>,
+    pub active_streams: Arc<Mutex<HashSet<Arc<String>>>>,
     pub bash: BashPool,
 }
 
@@ -64,7 +62,7 @@ pub async fn start_server(
     let app_state = AppState {
         window_tx,
         websocket_senders: Arc::new(RwLock::new(HashMap::new())),
-        active_commands: Arc::new(Mutex::new(HashSet::new())),
+        active_streams: Arc::new(Mutex::new(HashSet::new())),
         bash: BashPool::new(3).await?,
     };
 
@@ -92,6 +90,7 @@ pub async fn start_server(
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .await?;
+
     Ok(())
 }
 
@@ -225,7 +224,7 @@ async fn client_handler(
                                 let args = parts.iter().skip(3).copied().collect::<Vec<_>>();
                                 debug!("Stream '{}'  is listening to {} {:?}", stream_id, command, args);
 
-                                let mut lock = app_state.active_commands.lock().await;
+                                let mut lock = app_state.active_streams.lock().await;
 
                                 if lock.contains(&*stream_id) {
                                     warn!("Stopping duplicate stream '{}' (This is normal if you are in --dev mode)", &stream_id);
@@ -287,7 +286,7 @@ async fn client_handler(
                                         }
                                     }
 
-                                    let mut commands_lock = app_state_clone.active_commands.lock().await;
+                                    let mut commands_lock = app_state_clone.active_streams.lock().await;
                                     commands_lock.remove(&*stream_id_clone);
 
                                     let mut children_lock = children_ref.lock().await;
@@ -319,7 +318,7 @@ async fn client_handler(
                                 let mut senders_lock = app_state.websocket_senders.write().await;
                                 senders_lock.remove(&stream_id);
 
-                               let mut commands_lock = app_state.active_commands.lock().await;
+                               let mut commands_lock = app_state.active_streams.lock().await;
                                commands_lock.remove(&stream_id);
 
                                 // Kill the specific child process

@@ -25,7 +25,7 @@ impl BashProcess {
     pub async fn new() -> tokio::io::Result<Self> {
         let mut child = Command::new("bash")
             .arg("-c")
-            .arg("while read -r cmd; do eval \"$cmd\"; echo '<<<END_OF_OUTPUT>>>'; done")
+            .arg("exec -a '[wwwidgets-bash-pool]' bash -c 'while read -r cmd; do eval \"$cmd\"; echo \"<<<END_OF_OUTPUT>>>\"; done'")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
