@@ -162,6 +162,11 @@ async fn websocket_handler(
     response
 }
 
+struct ChildProcessHandle {
+    child: tokio::process::Child,
+    stream_id: Arc<String>,
+}
+
 async fn client_handler(
     fut: upgrade::UpgradeFut,
     app_state: AppState,
@@ -169,7 +174,7 @@ async fn client_handler(
     let mut ws = FragmentCollector::new(fut.await?);
     let (tx, mut rx) = mpsc::unbounded_channel::<WebsocketStreamMessage>();
     let mut label: Option<String> = None;
-    let mut spawned_tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+    let spawned_children = Arc::new(Mutex::new(Vec::<ChildProcessHandle>::new()));
 
     let result = loop {
         tokio::select! {
@@ -265,20 +270,27 @@ async fn client_handler(
                                     }
                                 };
 
+                                let child_id = child.id();
+                                debug!("Spawned child process with PID: {:?}", child_id);
+
                                 let Some(stdout) = child.stdout.take() else {
                                     error!("Failed to capture stdout for '{} {:?}'", command, args);
                                     continue;
                                 };
 
                                 let tx_clone = tx.clone();
-                                let handle = tokio::spawn(async move {
+                                let stream_id_clone = Arc::clone(&stream_id);
+                                let children_ref = Arc::clone(&spawned_children);
+                                let app_state_clone = app_state.clone();
+
+                                tokio::spawn(async move {
                                     let mut stdout_reader = BufReader::new(stdout).lines();
 
                                     loop {
                                         tokio::select! {
                                             Ok(Some(line)) = stdout_reader.next_line() => {
                                                 let message = WebsocketStreamMessage {
-                                                    stream_id: Arc::clone(&stream_id),
+                                                    stream_id: Arc::clone(&stream_id_clone),
                                                     data: line,
                                                 };
 
@@ -298,10 +310,27 @@ async fn client_handler(
                                         }
                                     }
 
-                                    let _ = child.wait().await;
+                                    let mut commands_lock = app_state_clone.active_commands.lock().await;
+                                    commands_lock.remove(&*stream_id_clone);
+
+                                    let mut children_lock = children_ref.lock().await;
+
+                                    if let Some(pos) = children_lock.iter().position(|h| h.stream_id.as_ref() == stream_id_clone.as_ref()) {
+                                        if let Some(handle) = children_lock.get_mut(pos) {
+
+                                            debug!("Child process {:?} exited naturally", handle.child.id());
+                                            let _ = handle.child.wait().await;
+                                        }
+
+                                        children_lock.remove(pos);
+                                    }
                                 });
 
-                                spawned_tasks.push(handle);
+                                let mut children_lock = spawned_children.lock().await;
+                                children_lock.push(ChildProcessHandle {
+                                    child,
+                                    stream_id: Arc::clone(&stream_id),
+                                });
                             }
 
                             "STOP_STREAM" => {
@@ -315,6 +344,20 @@ async fn client_handler(
 
                                let mut commands_lock = app_state.active_commands.lock().await;
                                commands_lock.remove(&stream_id);
+
+                                // Kill the specific child process
+                                let mut children_lock = spawned_children.lock().await;
+                                if let Some(pos) = children_lock.iter().position(|h| h.stream_id.as_ref() == &stream_id) {
+                                    if let Some(handle) = children_lock.get_mut(pos) {
+                                        if let Some(pid) = handle.child.id() {
+
+                                            debug!("Killing child process with PID: {} for stream '{}'", pid, stream_id);
+                                            let _ = handle.child.kill().await;
+                                        }
+                                    }
+
+                                    children_lock.remove(pos);
+                                }
 
                                 warn!("Stopped stream '{}'", stream_id);
                             }
@@ -336,9 +379,25 @@ async fn client_handler(
         lock.remove(&label);
     }
 
-    for handle in spawned_tasks {
-        handle.abort();
+    let mut children_lock = spawned_children.lock().await;
+
+    for handle in children_lock.iter_mut() {
+        if let Some(pid) = handle.child.id() {
+            info!(
+                "Cleaning up: killing child process with PID: {} (stream: {})",
+                pid, handle.stream_id
+            );
+
+            if let Err(e) = handle.child.kill().await {
+                error!("Failed to kill child process {}: {}", pid, e);
+            } else {
+                // Wait for the process to actually die
+                let _ = handle.child.wait().await;
+            }
+        }
     }
+
+    children_lock.clear();
 
     result
 }
