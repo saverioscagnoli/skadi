@@ -105,7 +105,7 @@ Example:
 
 ## Examples
 
-![bar-1](docs/screenshots/bar-1.jpg)
+![bar-1](docs/screenshots/bar-1.png)
 
 ## License
 MIT License (c) 2025 Saverio Scagnoli
