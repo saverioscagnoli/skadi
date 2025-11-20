@@ -103,5 +103,9 @@ Example:
 - `dev`: Enables the development server, and enables hot reloading.
 - `skip-requirements`: Skips the installation of requirements (blocks if they are not found [Node.js and npm]).
 
+## Examples
+
+![bar-1](docs/screenshots/bar-1.jpg)
+
 ## License
 MIT License (c) 2025 Saverio Scagnoli
