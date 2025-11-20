@@ -1,3 +1,4 @@
+mod bash;
 mod server;
 mod widget;
 mod window;

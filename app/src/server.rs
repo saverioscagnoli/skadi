@@ -1,4 +1,7 @@
-use crate::window::{WindowAction, WindowActionRequest};
+use crate::{
+    bash::{BashPool, BashProcess},
+    window::{WindowAction, WindowActionRequest},
+};
 use axum::{
     Router,
     extract::{ConnectInfo, Json, Path, State},
@@ -26,19 +29,11 @@ use tower_http::{
 };
 use traccia::{debug, error, info, warn};
 
-#[derive(Debug, Clone, Serialize)]
-pub struct CommandOutput {
-    pub success: bool,
-    pub stdout: String,
-    pub stderr: String,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ExecRequest {
     command: String,
     args: Vec<String>,
-    widget_label: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -55,6 +50,7 @@ pub struct AppState {
     /// The hash set consists of [widget_label+command_name+command_args]
     /// Concatenate them so we don't have to use a HashMap<String, Vec<String>>
     pub active_commands: Arc<Mutex<HashSet<Arc<String>>>>,
+    pub bash: BashPool,
 }
 
 pub async fn start_server(
@@ -69,6 +65,7 @@ pub async fn start_server(
         window_tx,
         websocket_senders: Arc::new(RwLock::new(HashMap::new())),
         active_commands: Arc::new(Mutex::new(HashSet::new())),
+        bash: BashPool::new(3).await?,
     };
 
     let app = Router::new()
@@ -102,43 +99,23 @@ pub async fn healthcheck() -> impl IntoResponse {
     (StatusCode::OK, "OK")
 }
 
-async fn exec(Json(body): Json<ExecRequest>) -> impl IntoResponse {
+async fn exec(
+    State(app_state): State<AppState>,
+    Json(body): Json<ExecRequest>,
+) -> impl IntoResponse {
     info!(
-        "Widget '{}' requested execution: {} {:?}",
-        &body.widget_label, &body.command, &body.args
+        "Requesting execution of command: {} {:?}",
+        body.command, body.args
     );
 
-    let output = Command::new(&body.command)
-        .args(&body.args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await;
-
-    match output {
-        Ok(output) => {
-            let success = output.status.success();
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-            Json(CommandOutput {
-                success,
-                stdout,
-                stderr,
-            })
-        }
-
+    match app_state.bash.execute(&body.command, Some(body.args)).await {
+        Ok(output) => (StatusCode::OK, output),
         Err(e) => {
-            warn!(
-                "Widget '{}' execution request {} {:?} failed: {}",
-                &body.widget_label, &body.command, &body.args, e
-            );
-
-            Json(CommandOutput {
-                success: false,
-                stdout: String::new(),
-                stderr: e.to_string(),
-            })
+            error!("Command execution failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Execution error: {}", e),
+            )
         }
     }
 }

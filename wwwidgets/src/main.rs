@@ -3,9 +3,9 @@
 mod requirements;
 mod vite;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use common::{config::Config, paths, util};
-use traccia::{LogLevel, debug, fatal};
+use traccia::{LogLevel, debug, fatal, info};
 
 #[derive(Debug, Clone, clap::Parser)]
 #[clap(author, version, about)]
@@ -19,6 +19,15 @@ struct Args {
 
     #[arg(long, help = "Run in development mode", default_value_t = false)]
     dev: bool,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+enum Commands {
+    /// Clear the build cache and temporary files
+    Clean,
 }
 
 struct LogFormatter;
@@ -47,6 +56,30 @@ fn init_logging() {
     });
 }
 
+fn clean_cache() {
+    let local_dir = paths::local_dir();
+
+    info!("Cleaning build cache at {}", local_dir.display());
+
+    if local_dir.exists() {
+        match std::fs::remove_dir_all(&local_dir) {
+            Ok(_) => {
+                info!("Successfully cleaned build cache");
+
+                // Recreate the directory
+                if let Err(e) = std::fs::create_dir_all(&local_dir) {
+                    fatal!("Failed to recreate local directory: {}", e);
+                }
+            }
+            Err(e) => {
+                fatal!("Failed to clean build cache: {}", e);
+            }
+        }
+    } else {
+        info!("Build cache directory doesn't exist, nothing to clean");
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
@@ -61,6 +94,16 @@ async fn main() {
     }
 
     init_logging();
+
+    // Handle subcommands
+    if let Some(command) = args.command {
+        match command {
+            Commands::Clean => {
+                clean_cache();
+                return;
+            }
+        }
+    }
 
     debug!("Checking requirements...");
 

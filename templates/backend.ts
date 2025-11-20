@@ -1,16 +1,14 @@
 import { useEffect } from "react";
 
-type CommandOutput = {
-  success: boolean;
-  stdout: string;
-  stderr: string;
-};
-
 // For single exec request, don't use websockets
 // just for simplcity, use post requests.
 // They're more than enough for this use case
 
-async function exec(command: string, args?: string[]): Promise<CommandOutput> {
+async function exec(command: string): Promise<String> {
+  let parts = command.split(" ");
+  let cmd = parts[0];
+  let args = parts.slice(1);
+
   try {
     let response = await fetch("/exec", {
       method: "POST",
@@ -18,7 +16,7 @@ async function exec(command: string, args?: string[]): Promise<CommandOutput> {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        command,
+        command: cmd,
         args: args || [],
         widgetLabel: document.title,
       }),
@@ -28,16 +26,13 @@ async function exec(command: string, args?: string[]): Promise<CommandOutput> {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    return await response.json();
+    return await response.text();
   } catch (err) {
     console.error(
       "Request failed. The return output is the http error, not the command stderr.",
     );
-    return {
-      success: false,
-      stdout: "",
-      stderr: err.message,
-    };
+
+    return "";
   }
 }
 
@@ -96,20 +91,19 @@ function releaseWebsocket() {
   }
 }
 
-function useListen(
-  command: string,
-  args: string[],
-  callback: (line: string) => void,
-) {
+function useListen(command: string, callback: (line: string) => void) {
   useEffect(() => {
     const streamId = `stream_${++streamIdCounter}_${Date.now()}`;
+    let parts = command.split(" ");
+    let cmd = parts[0];
+    let args = parts.slice(1);
 
     streamCallbacks.set(streamId, callback);
 
     const ws = getWebsocket();
 
     const startStream = () => {
-      ws.send(`LISTEN ${streamId} ${command} ${args?.join(" ") || ""}`);
+      ws.send(`LISTEN ${streamId} ${cmd} ${args?.join(" ") || ""}`);
     };
 
     if (ws.readyState === WebSocket.OPEN) {

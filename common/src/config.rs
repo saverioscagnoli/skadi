@@ -246,6 +246,7 @@ impl Config {
         let config: Self = serde_json::from_str(&content)?;
 
         info!("Using configuration file at {:?}", config_path);
+        debug!("{:?}", config);
         Ok(config)
     }
 }

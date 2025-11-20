@@ -105,7 +105,7 @@ Example:
 
 ## Examples
 
-![bar-1](docs/screenshots/bar-1.png)!
+![bar-1](docs/screenshots/bar-1.png)
 ![bar-2](docs/screenshots/bar-2.png)
 
 ## License
