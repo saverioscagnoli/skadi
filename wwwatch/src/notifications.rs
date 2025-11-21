@@ -1,4 +1,3 @@
-use crate::{Op, payloads::NotificationPayload};
 use common::{paths, util};
 use image::{ImageBuffer, RgbaImage};
 use std::collections::hash_map::DefaultHasher;
@@ -11,6 +10,8 @@ use std::{
     path::{Path, PathBuf},
 };
 use zbus::{connection, interface, zvariant::Value};
+
+use crate::payload::{NotificationPayload, OpCode, Payload};
 
 fn extract_image(
     hints: &HashMap<String, Value>,
@@ -166,16 +167,18 @@ impl Notifications {
         hints: HashMap<String, Value<'_>>,
         expire_timeout: i32,
     ) -> u32 {
-        let payload = NotificationPayload {
-            op: Op::Notification,
-            app_name: app_name.to_owned(),
-            replaces_id,
-            notification_icon: Some(notification_icon.to_owned()),
-            image: extract_image(&hints, &mut self.image_cache),
-            summary: summary.to_owned(),
-            body: body.to_owned(),
-            actions,
-            expiration: expire_timeout,
+        let payload = Payload {
+            op: OpCode::Notification,
+            data: NotificationPayload {
+                app_name: app_name.to_owned(),
+                replaces_id,
+                notification_icon: Some(notification_icon.to_owned()),
+                image: extract_image(&hints, &mut self.image_cache),
+                summary: summary.to_owned(),
+                body: body.to_owned(),
+                actions,
+                expiration: expire_timeout,
+            },
         };
 
         println!("{}", serde_json::to_string(&payload).unwrap());

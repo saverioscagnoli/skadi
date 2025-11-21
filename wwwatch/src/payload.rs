@@ -1,36 +1,57 @@
-use crate::Op;
-use serde::Serialize;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Serialize)]
-pub struct WorkspacePayload<'a> {
-    pub op: Op,
-    pub current: &'a String,
-    pub total: &'a Vec<(i32, String)>,
+use serde::Serialize;
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OpCode {
+    Workspaces,
+    Info,
+    Notification,
+}
+
+pub trait SerializePrint: Serialize {
+    fn print(&self) {
+        println!("{}", serde_json::to_string(&self).expect(":3"));
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct Payload<T> {
+    pub op: OpCode,
+    pub data: T,
+}
+
+impl<T: Serialize> SerializePrint for Payload<T> {}
+
+#[derive(Debug, Serialize)]
+pub struct WorkspacesPayload {
+    pub focused: i32,
+    pub workspaces: Vec<(i32, String)>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct CoreInfo {
     pub usage: f32,
-    pub freq: f32,
+    pub freq: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct CpuPayload {
+#[derive(Debug, Serialize)]
+pub struct CpuInfo {
     pub usage: f32,
     pub temp: f32,
-    pub freq: f32,
+    pub freq: u64,
     pub cores: Vec<CoreInfo>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct MemPayload {
+#[derive(Debug, Serialize)]
+pub struct MemoryInfo {
     pub total: u64,
     pub used: u64,
     pub free: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Serialize)]
 pub struct DiskInfo {
     pub primary: bool,
     pub total: u64,
@@ -39,42 +60,35 @@ pub struct DiskInfo {
     pub read: u64,
     pub write: u64,
     pub name: String,
-    pub mount_point: String,
+    pub mountpoint: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct DiskPayload {
-    pub disks: Vec<DiskInfo>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct NetworkInterface {
+#[derive(Debug, Serialize)]
+pub struct InterfaceInfo {
+    pub primary: bool,
     pub name: String,
     pub download: u64,
     pub upload: u64,
-    pub primary: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct NetworkPayload {
+#[derive(Debug, Serialize)]
+pub struct NetworkInfo {
     pub download: u64,
     pub upload: u64,
-    pub interfaces: Vec<NetworkInterface>,
+    pub interfaces: Vec<InterfaceInfo>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Serialize)]
 pub struct InfoPayload {
-    pub op: Op,
-    pub cpu: Option<CpuPayload>,
-    pub mem: Option<MemPayload>,
-    pub disks: Option<DiskPayload>,
-    pub network: Option<NetworkPayload>,
+    pub cpu: Option<CpuInfo>,
+    pub memory: Option<MemoryInfo>,
+    pub disks: Option<Vec<DiskInfo>>,
+    pub network: Option<NetworkInfo>,
 }
 
 /// https://specifications.freedesktop.org/notification/latest/basic-design.html
 #[derive(Debug, Clone, Serialize)]
 pub struct NotificationPayload {
-    pub op: Op,
     pub app_name: String,
     /// An optional ID of an existing notification that this notification is intended to replace.
     pub replaces_id: u32,
