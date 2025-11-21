@@ -1,174 +1,71 @@
 mod info;
 mod notifications;
-mod payloads;
+mod payload;
+mod wm;
 
-use crate::payloads::WorkspacePayload;
 use clap::Parser;
-use serde::Serialize;
-use std::collections::HashSet;
-use std::error::Error;
-use swayipc::{Connection, Event, EventType, WorkspaceChange};
 
-#[derive(Debug, clap::Subcommand)]
-enum Command {
-    Workspace,
-}
-
-#[derive(Debug, clap::Parser)]
-struct Args {
-    #[arg(long, help = "Subscribe to workspace events", default_value_t = false)]
-    workspaces: bool,
-
-    #[arg(
-        long,
-        help = "Intercept notifications from dbus",
-        default_value_t = false
-    )]
-    notifications: bool,
-
-    #[arg(
-        long,
-        help = "Queries cpu info every <interval> milliseconds",
-        default_value_t = false
-    )]
+#[derive(Debug, Clone, clap::Parser)]
+struct InfoArgs {
+    #[arg(long, default_value_t = false)]
     cpu: bool,
 
-    #[arg(
-        long,
-        help = "Queries memory info every <interval> milliseconds",
-        default_value_t = false
-    )]
+    #[arg(long, default_value_t = false)]
     mem: bool,
 
-    #[arg(
-        long,
-        help = "Queries disk info every <interval> milliseconds",
-        default_value_t = false
-    )]
-    disk: bool,
+    #[arg(long, default_value_t = false)]
+    disks: bool,
 
-    #[arg(
-        long,
-        help = "Queries network info every <interval> milliseconds",
-        default_value_t = false
-    )]
-    network: bool,
-    #[arg(
-        long,
-        help = "Interval in milliseconds, used to query information about the system",
-        default_value_t = 1000
-    )]
+    #[arg(long, default_value_t = false)]
+    net: bool,
+
+    #[arg(long, default_value_t = false)]
+    battery: bool,
+
+    #[arg(long, default_value_t = 2000)]
     interval: u64,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
-#[repr(u8)]
-#[serde(rename_all = "lowercase")]
-enum Op {
-    Info,
-    Workspaces,
-    Notification,
+#[derive(Debug, Clone, clap::Parser)]
+struct Args {
+    #[arg(long, default_value_t = false)]
+    workspaces: bool,
+
+    #[clap(flatten)]
+    info: InfoArgs,
+
+    #[arg(long, default_value_t = false)]
+    notifications: bool,
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
+async fn main() {
     let args = Args::parse();
-    let mut event_list = Vec::new();
-    let mut connection = Connection::new()?;
-    let mut current_workspace = String::new();
-    let mut workspace_cache = HashSet::new();
-
-    info::query_info(args.cpu, args.mem, args.disk, args.network, args.interval);
+    let mut handles = Vec::new();
 
     if args.workspaces {
-        event_list.push(EventType::Workspace);
-        // Initial check to workspaces
+        // TODO: Detect wm
+        let handle = tokio::spawn(async move { wm::sway::listen(args.workspaces).await });
+        handles.push(handle);
+    }
 
-        let workspaces = connection.get_workspaces()?;
-
-        for ws in workspaces {
-            if ws.focused {
-                current_workspace = ws.name.clone();
-            }
-            let num = ws.num;
-            workspace_cache.insert((num, ws.name));
-        }
-
-        // Sort workspaces by num
-        let mut sorted_workspaces: Vec<_> = workspace_cache.iter().cloned().collect();
-        sorted_workspaces.sort_by_key(|(num, _)| *num);
-
-        let payload = WorkspacePayload {
-            op: Op::Workspaces,
-            current: &current_workspace,
-            total: &sorted_workspaces,
-        };
-
-        println!("{}", serde_json::to_string(&payload).unwrap());
+    if args.info.cpu || args.info.mem || args.info.disks || args.info.net || args.info.battery {
+        let handle = tokio::spawn(async move { info::poll(&args.info).await });
+        handles.push(handle);
     }
 
     if args.notifications {
-        tokio::spawn(async move {
-            if let Err(e) = notifications::listen().await {
-                println!("{}", e);
-            }
+        let handle = tokio::spawn(async move {
+            notifications::listen()
+                .await
+                .expect("Failed to start notification daemon");
         });
+        handles.push(handle);
     }
 
-    // One connection for events
-    let events = connection.subscribe(&event_list)?;
-
-    // Listen for events
-    for event in events.map_while(Result::ok) {
-        if let Event::Workspace(ws_event) = event {
-            match ws_event.change {
-                WorkspaceChange::Focus => {
-                    if let Some(current_ws) = ws_event.current
-                        && let Some(name) = current_ws.name
-                    {
-                        let num = current_ws.num.unwrap_or(-1);
-                        workspace_cache.insert((num, name.clone()));
-                        current_workspace = name;
-                    }
-
-                    // Sort workspaces by num
-                    let mut sorted_workspaces: Vec<_> = workspace_cache.iter().cloned().collect();
-                    sorted_workspaces.sort_by_key(|(num, _)| *num);
-
-                    let payload = WorkspacePayload {
-                        op: Op::Workspaces,
-                        current: &current_workspace,
-                        total: &sorted_workspaces,
-                    };
-
-                    println!("{}", serde_json::to_string(&payload)?);
-                }
-
-                WorkspaceChange::Empty => {
-                    if let Some(current_ws) = ws_event.current
-                        && let Some(name) = current_ws.name
-                    {
-                        let num = current_ws.num.unwrap_or(-1);
-                        workspace_cache.remove(&(num, name));
-                    }
-
-                    // Sort workspaces by num
-                    let mut sorted_workspaces: Vec<_> = workspace_cache.iter().cloned().collect();
-                    sorted_workspaces.sort_by_key(|(num, _)| *num);
-
-                    let payload = WorkspacePayload {
-                        op: Op::Workspaces,
-                        current: &current_workspace,
-                        total: &sorted_workspaces,
-                    };
-
-                    println!("{}", serde_json::to_string(&payload).unwrap());
-                }
-
-                _ => {}
-            }
+    for handle in handles {
+        if let Err(e) = handle.await {
+            eprintln!("Error: {}", e);
         }
     }
-
-    Ok(())
 }
