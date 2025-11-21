@@ -5,7 +5,7 @@ mod vite;
 
 use clap::{Parser, Subcommand};
 use common::{config::Config, paths, util};
-use traccia::{LogLevel, debug, fatal, info};
+use traccia::{LogLevel, debug, fatal, info, warn};
 
 #[derive(Debug, Clone, clap::Parser)]
 #[clap(author, version, about)]
@@ -19,6 +19,9 @@ struct Args {
 
     #[arg(long, help = "Run in development mode", default_value_t = false)]
     dev: bool,
+
+    #[arg(long, help = "Skip requirements check", default_value_t = false)]
+    skip_requirements: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -66,7 +69,6 @@ fn clean_cache() {
             Ok(_) => {
                 info!("Successfully cleaned build cache");
 
-                // Recreate the directory
                 if let Err(e) = std::fs::create_dir_all(&local_dir) {
                     fatal!("Failed to recreate local directory: {}", e);
                 }
@@ -95,7 +97,6 @@ async fn main() {
 
     init_logging();
 
-    // Handle subcommands
     if let Some(command) = args.command {
         match command {
             Commands::Clean => {
@@ -105,14 +106,18 @@ async fn main() {
         }
     }
 
-    debug!("Checking requirements...");
+    if args.skip_requirements {
+        warn!("Skipping requirements check.");
+    } else {
+        debug!("Checking requirements...");
 
-    if let Err(e) = requirements::check() {
-        fatal!("{}", e);
-        return;
+        if let Err(e) = requirements::check() {
+            fatal!("{}", e);
+            return;
+        }
+
+        debug!("All requirements are met.");
     }
-
-    debug!("All requirements are met.");
 
     let config = match Config::parse() {
         Ok(c) => c,
