@@ -8,7 +8,7 @@ use swayipc::WorkspaceChange;
 use swayipc::{Connection, EventType};
 
 pub async fn listen(workspaces: bool) {
-    let mut conn = Connection::new().expect("Failed to enstablish sway ipc connection");
+    let mut conn = Connection::new().expect("Failed to establish sway ipc connection");
     let mut event_list = Vec::new();
     let mut focused_workspace_index = 0;
     let mut workspace_cache = HashSet::new();
@@ -20,7 +20,7 @@ pub async fn listen(workspaces: bool) {
         let workspaces = match conn.get_workspaces() {
             Ok(workspaces) => workspaces,
             Err(e) => {
-                eprintln!("Failed te get workspaces: {}", e);
+                eprintln!("Failed to get workspaces: {}", e);
                 return;
             }
         };
@@ -87,13 +87,33 @@ pub async fn listen(workspaces: bool) {
                 }
 
                 WorkspaceChange::Empty => {
-                    if let Some(focused_ws) = ws_event.current
-                        && let Some(name) = focused_ws.name.clone()
+                    if let Some(empty_ws) = ws_event.current
+                        && let Some(name) = empty_ws.name.clone()
                     {
-                        let num = focused_ws.num.unwrap_or(-1);
+                        let num = empty_ws.num.unwrap_or(-1);
+                        workspace_cache.remove(&(num, name));
+                    }
 
+                    let mut workspaces = workspace_cache.iter().cloned().collect::<Vec<_>>();
+                    workspaces.sort_by_key(|(num, _)| *num);
+
+                    let payload = Payload {
+                        op: OpCode::Workspaces,
+                        data: WorkspacesPayload {
+                            focused: focused_workspace_index,
+                            workspaces,
+                        },
+                    };
+
+                    payload.print();
+                }
+
+                WorkspaceChange::Init => {
+                    if let Some(new_ws) = ws_event.current
+                        && let Some(name) = new_ws.name.clone()
+                    {
+                        let num = new_ws.num.unwrap_or(-1);
                         workspace_cache.insert((num, name));
-                        focused_workspace_index = num;
                     }
 
                     let mut workspaces = workspace_cache.iter().cloned().collect::<Vec<_>>();
